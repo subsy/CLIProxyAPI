@@ -36,4 +36,10 @@ func TestDoClientConfig(t *testing.T) {
 	if code := DoClientConfig(&bytes.Buffer{}, cfg, "cursor", ""); code != 2 {
 		t.Fatalf("unknown client exit = %d, want 2", code)
 	}
+	if code := DoClientConfig(&bytes.Buffer{}, cfg, "codex", "evil\"\nmodel = \"x"); code != 2 {
+		t.Fatalf("host with quotes and newlines exit = %d, want 2", code)
+	}
+	if code := DoClientConfig(&bytes.Buffer{}, cfg, "codex", "[fd7a::1]"); code != 0 {
+		t.Fatalf("IPv6 host exit = %d, want 0", code)
+	}
 }

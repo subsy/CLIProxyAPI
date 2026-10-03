@@ -1,6 +1,7 @@
 package dashboard
 
 import (
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -36,7 +37,7 @@ func newTestAlerter(now *time.Time) (*Alerter, chan Alert) {
 	alerter := NewAlerter()
 	alerter.now = func() time.Time { return *now }
 	delivered := make(chan Alert, 16)
-	alerter.deliver = func(_ alertSettings, alert Alert) { delivered <- alert }
+	alerter.deliver = func(_ alertSettings, alert Alert) error { delivered <- alert; return nil }
 	return alerter, delivered
 }
 
@@ -127,6 +128,7 @@ func TestNeedsRelogin(t *testing.T) {
 		{coreauth.StatusError, "invalid grant (retrying)", true},
 		{coreauth.StatusDisabled, "disabled (invalid grant)", true},
 		{coreauth.StatusError, "token expired", true},
+		{coreauth.StatusDisabled, "invalid_grant", true},
 		{coreauth.StatusActive, "", false},
 		{coreauth.StatusError, "rate limited", false},
 	}
@@ -237,5 +239,55 @@ func TestRoundDuration(t *testing.T) {
 		if got := roundDuration(in); got != want {
 			t.Errorf("roundDuration(%s) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+func TestAlerterRetriesFailedDelivery(t *testing.T) {
+	now := time.Now()
+	alerter := NewAlerter()
+	alerter.now = func() time.Time { return now }
+	attempts := make(chan struct{}, 4)
+	fail := true
+	alerter.deliver = func(alertSettings, Alert) error {
+		attempts <- struct{}{}
+		if fail {
+			fail = false
+			return errors.New("HTTP 503")
+		}
+		return nil
+	}
+	alerter.Configure(config.RoutingAlertsConfig{WebhookURL: "http://example.invalid"})
+	broken := oauthAuth("b", "codex")
+	broken.Status, broken.StatusMessage = coreauth.StatusError, "unauthorized"
+
+	alerter.Evaluate([]*coreauth.Auth{broken})
+	<-attempts
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		alerter.mu.Lock()
+		_, pending := alerter.notified["relogin:b"]
+		alerter.mu.Unlock()
+		if !pending || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	alerter.Evaluate([]*coreauth.Auth{broken})
+	select {
+	case <-attempts:
+	case <-time.After(5 * time.Second):
+		t.Fatal("failed delivery was not retried")
+	}
+}
+
+func TestClaudeOverageWindowDoesNotCountAsUsedUp(t *testing.T) {
+	now := time.Now()
+	auth := oauthAuth("a", "claude")
+	auth.Quota = coreauth.QuotaState{ObservedAt: now, Signals: map[string]string{
+		"Anthropic-Ratelimit-Unified-7d_oi-Utilization": "1.02",
+		"Anthropic-Ratelimit-Unified-7d_oi-Reset":       strconv.FormatInt(now.Add(time.Hour).Unix(), 10),
+	}}
+	if got := exhaustedWindows(coreauth.ParseQuotaWindows(auth.Provider, auth.Quota), now); len(got) != 0 {
+		t.Fatalf("exhausted = %+v, want none for an allowed overage window", got)
 	}
 }

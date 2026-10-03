@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/registry"
 	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
 )
 
@@ -70,6 +71,11 @@ func TestParseQuotaWindowsCodexClassifiesByWindowLength(t *testing.T) {
 	}
 }
 
+func rejectedWeekly(auth *Auth) *Auth {
+	auth.Quota.Signals["Anthropic-Ratelimit-Unified-7d-Status"] = "rejected"
+	return auth
+}
+
 func TestResetSoonestRankTiers(t *testing.T) {
 	now := time.Now()
 	cases := []struct {
@@ -81,7 +87,7 @@ func TestResetSoonestRankTiers(t *testing.T) {
 		{"unobserved api key", &Auth{ID: "x", Provider: "codex", Attributes: map[string]string{AttributeAuthKind: AuthKindAPIKey}}, ResetTierUnknown},
 		{"known", claudeQuotaAuth("x", now, "0.1", "0.5", now.Add(time.Hour)), ResetTierKnown},
 		{"short window nearly full", claudeQuotaAuth("x", now, "0.99", "0.5", now.Add(time.Hour)), ResetTierExhausted},
-		{"weekly exhausted", claudeQuotaAuth("x", now, "0.1", "1.0", now.Add(time.Hour)), ResetTierExhausted},
+		{"weekly exhausted", rejectedWeekly(claudeQuotaAuth("x", now, "0.1", "1.0", now.Add(time.Hour))), ResetTierExhausted},
 		{"weekly rolled over", claudeQuotaAuth("x", now.Add(-8*24*time.Hour), "0.1", "1.0", now.Add(-time.Hour)), ResetTierKnown},
 	}
 	for _, tc := range cases {
@@ -172,5 +178,58 @@ func TestSchedulerPickMixed_ResetSoonest(t *testing.T) {
 	}
 	if got.ID != "claude-soon" || provider != "claude" {
 		t.Fatalf("pickMixed() = %s/%s, want claude-soon/claude", got.ID, provider)
+	}
+}
+
+func TestResetSoonestRankReviewCases(t *testing.T) {
+	now := time.Now()
+	// One weekly window used up blocks the credential even when another still has quota.
+	split := claudeQuotaAuth("split", now, "0.1", "1.0", now.Add(time.Hour))
+	split.Quota.Signals["Anthropic-Ratelimit-Unified-7d-Status"] = "rejected"
+	split.Quota.Signals["Anthropic-Ratelimit-Unified-7d_oi-Utilization"] = "0.2"
+	split.Quota.Signals["Anthropic-Ratelimit-Unified-7d_oi-Reset"] = unixString(now.Add(48 * time.Hour))
+	if tier, _ := ResetSoonestRank(split, now); tier != ResetTierExhausted {
+		t.Errorf("split weekly windows: tier = %d, want exhausted", tier)
+	}
+	// Claude can report an allowed overage window above 100%; it must not demote the account.
+	overage := claudeQuotaAuth("overage", now, "0.1", "0.5", now.Add(time.Hour))
+	overage.Quota.Signals["Anthropic-Ratelimit-Unified-7d_oi-Utilization"] = "1.02"
+	overage.Quota.Signals["Anthropic-Ratelimit-Unified-7d_oi-Reset"] = unixString(now.Add(time.Hour))
+	if tier, _ := ResetSoonestRank(overage, now); tier != ResetTierKnown {
+		t.Errorf("allowed overage window: tier = %d, want known", tier)
+	}
+	// A credential that answered without quota headers is probed once, then ranked unknown.
+	silent := &Auth{ID: "silent", Provider: "claude", Attributes: map[string]string{AttributeAuthKind: AuthKindOAuth}, Success: 1}
+	if tier, _ := ResetSoonestRank(silent, now); tier != ResetTierUnknown {
+		t.Errorf("credential without quota headers after a request: tier = %d, want unknown", tier)
+	}
+}
+
+func TestSchedulerResetSoonestSeesQuotaFromOtherModels(t *testing.T) {
+	now := time.Now()
+	reg := registry.GetGlobalRegistry()
+	for _, authID := range []string{"a", "b"} {
+		reg.RegisterClient(authID, "claude", []*registry.ModelInfo{{ID: "model-x"}, {ID: "model-y"}})
+	}
+	t.Cleanup(func() {
+		reg.UnregisterClient("a")
+		reg.UnregisterClient("b")
+	})
+	scheduler := newSchedulerForTest(&ResetSoonestSelector{},
+		claudeQuotaAuth("a", now, "0.1", "0.2", now.Add(time.Hour)),
+		claudeQuotaAuth("b", now, "0.1", "0.2", now.Add(2*time.Hour)),
+	)
+	for _, model := range []string{"model-x", "model-y"} {
+		if got, _ := scheduler.pickSingle(context.Background(), "claude", model, cliproxyexecutor.Options{}, nil); got == nil || got.ID != "a" {
+			t.Fatalf("initial pick for %s = %v, want a", model, got)
+		}
+	}
+	// A response for model-x reports that a's weekly window now resets next week.
+	updated := claudeQuotaAuth("a", now, "0.1", "0.0", now.Add(7*24*time.Hour))
+	updated.Generation = 1
+	updated.UpdatedAt = now.Add(time.Second)
+	scheduler.upsertAuthResult(updated, []string{"model-x"}, false)
+	if got, _ := scheduler.pickSingle(context.Background(), "claude", "model-y", cliproxyexecutor.Options{}, nil); got == nil || got.ID != "b" {
+		t.Fatalf("model-y pick after model-x observation = %v, want b", got)
 	}
 }

@@ -62,7 +62,8 @@ type Alerter struct {
 	notified map[string]time.Time
 	client   *http.Client
 	now      func() time.Time
-	deliver  func(alertSettings, Alert)
+	// deliver posts one alert and reports whether the receiver accepted it.
+	deliver func(alertSettings, Alert) error
 }
 
 var defaultAlerter = NewAlerter()
@@ -75,8 +76,12 @@ func NewAlerter() *Alerter {
 	a := &Alerter{
 		active:   make(map[string]Alert),
 		notified: make(map[string]time.Time),
-		client:   &http.Client{Timeout: webhookTimeout},
-		now:      time.Now,
+		client: &http.Client{
+			Timeout: webhookTimeout,
+			// Alerts carry account names; never let a receiver bounce them elsewhere.
+			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+		},
+		now: time.Now,
 	}
 	a.deliver = a.sendWebhook
 	a.Configure(config.RoutingAlertsConfig{})
@@ -167,7 +172,7 @@ func (a *Alerter) Evaluate(auths []*coreauth.Auth) {
 	for _, alert := range fresh {
 		log.WithFields(log.Fields{"alert": alert.Kind, "provider": alert.Provider, "auth": alert.AuthID}).Warn(alert.Message)
 		if settings.webhookURL != "" && deliver != nil {
-			go deliver(settings, alert)
+			go a.deliverOnce(deliver, settings, alert)
 		}
 	}
 }
@@ -264,7 +269,7 @@ func exhaustedWindows(windows []coreauth.QuotaWindow, now time.Time) []coreauth.
 		if window.Limit != "" || !window.ResetAt.After(now) {
 			continue
 		}
-		if window.UsedFraction >= 1 || window.Status == "rejected" {
+		if window.Exhausted() {
 			exhausted = append(exhausted, window)
 		}
 	}
@@ -339,7 +344,7 @@ func NeedsRelogin(auth *coreauth.Auth) (bool, string) {
 	if auth == nil || auth.AuthKind() != coreauth.AuthKindOAuth {
 		return false, ""
 	}
-	message := strings.ToLower(strings.TrimSpace(auth.StatusMessage))
+	message := strings.ReplaceAll(strings.ToLower(strings.TrimSpace(auth.StatusMessage)), "_", " ")
 	switch {
 	case strings.Contains(message, "invalid grant"):
 		return true, "the refresh token was rejected"
@@ -349,6 +354,8 @@ func NeedsRelogin(auth *coreauth.Auth) (bool, string) {
 		return true, "the access token expired and refreshing it failed"
 	case auth.Status == coreauth.StatusError && auth.LastError != nil && auth.LastError.HTTPStatus == http.StatusUnauthorized:
 		return true, "the provider answered 401 Unauthorized"
+	case auth.LastError != nil && strings.Contains(strings.ToLower(auth.LastError.Message), "invalid_grant"):
+		return true, "the refresh token was rejected"
 	}
 	return false, ""
 }
@@ -427,7 +434,20 @@ func clockTime(at, now time.Time) string {
 	return at.Format("15:04 MST")
 }
 
-func (a *Alerter) sendWebhook(settings alertSettings, alert Alert) {
+// deliverOnce posts an alert and, if delivery fails, forgets that it was announced so the
+// next evaluation (a minute later) tries again while the condition still holds.
+func (a *Alerter) deliverOnce(deliver func(alertSettings, Alert) error, settings alertSettings, alert Alert) {
+	errDeliver := deliver(settings, alert)
+	if errDeliver == nil {
+		return
+	}
+	log.WithError(errDeliver).WithField("alert", alert.Kind).Warn("alerts: webhook delivery failed; retrying on the next evaluation")
+	a.mu.Lock()
+	delete(a.notified, alert.Key)
+	a.mu.Unlock()
+}
+
+func (a *Alerter) sendWebhook(settings alertSettings, alert Alert) error {
 	var body []byte
 	contentType := "application/json"
 	switch settings.webhookFormat {
@@ -441,15 +461,13 @@ func (a *Alerter) sendWebhook(settings alertSettings, alert Alert) {
 		}
 		encoded, errMarshal := json.Marshal(payload)
 		if errMarshal != nil {
-			log.WithError(errMarshal).Warn("alerts: failed to encode webhook payload")
-			return
+			return fmt.Errorf("encode webhook payload: %w", errMarshal)
 		}
 		body = encoded
 	}
 	req, errReq := http.NewRequest(http.MethodPost, settings.webhookURL, bytes.NewReader(body))
 	if errReq != nil {
-		log.WithError(errReq).Warn("alerts: invalid webhook URL")
-		return
+		return fmt.Errorf("invalid webhook URL: %w", errReq)
 	}
 	req.Header.Set("Content-Type", contentType)
 	// ntfy and similar services read these headers in text mode.
@@ -459,8 +477,7 @@ func (a *Alerter) sendWebhook(settings alertSettings, alert Alert) {
 	}
 	resp, errDo := a.client.Do(req)
 	if errDo != nil {
-		log.WithError(errDo).Warn("alerts: webhook delivery failed")
-		return
+		return errDo
 	}
 	defer func() {
 		if errClose := resp.Body.Close(); errClose != nil {
@@ -468,6 +485,7 @@ func (a *Alerter) sendWebhook(settings alertSettings, alert Alert) {
 		}
 	}()
 	if resp.StatusCode >= 300 {
-		log.Warnf("alerts: webhook answered HTTP %d", resp.StatusCode)
+		return fmt.Errorf("webhook answered HTTP %d", resp.StatusCode)
 	}
+	return nil
 }

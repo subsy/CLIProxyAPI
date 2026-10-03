@@ -211,9 +211,10 @@ func main() {
 	flag.Parse()
 
 	if clientConfig != "" {
-		cfgClient, errLoad := config.LoadConfig(configPath)
+		clientConfigPath := defaultPluginBootstrapConfigPath(configPath)
+		cfgClient, errLoad := config.LoadConfig(clientConfigPath)
 		if errLoad != nil {
-			fmt.Fprintf(os.Stderr, "failed to load config %s: %v\n", configPath, errLoad)
+			fmt.Fprintf(os.Stderr, "failed to load config %s: %v\n", clientConfigPath, errLoad)
 			os.Exit(1)
 		}
 		os.Exit(cmd.DoClientConfig(os.Stdout, cfgClient, clientConfig, clientConfigHost))

@@ -75,7 +75,10 @@ type scheduledAuthMeta struct {
 
 // modelScheduler tracks ready and blocked auths for one provider/model combination.
 type modelScheduler struct {
-	modelKey        string
+	modelKey string
+	// providerAuths is the owning provider's latest metadata by auth ID. Results only refresh
+	// the targeted shards, so ranking reads quota from here to see every observation.
+	providerAuths   map[string]*scheduledAuthMeta
 	entries         map[string]*scheduledAuth
 	priorityOrder   []int
 	readyByPriority map[int]*readyBucket
@@ -532,8 +535,16 @@ func (s *authScheduler) pickMixedWithStrategy(ctx context.Context, providers []s
 				entries = append(entries, bucket.all.flat...)
 			}
 		}
+		latest := make(map[string]*scheduledAuthMeta)
+		for _, providerKey := range normalized {
+			if providerState := s.providers[providerKey]; providerState != nil {
+				for id, meta := range providerState.auths {
+					latest[id] = meta
+				}
+			}
+		}
 		view := readyView{flat: entries}
-		picked := view.pickResetSoonest(predicate, now)
+		picked := view.pickResetSoonest(predicate, now, latest)
 		if picked != nil && picked.meta != nil {
 			return picked.auth, picked.meta.providerKey, nil
 		}
@@ -1198,6 +1209,7 @@ func (p *providerScheduler) ensureModelLocked(modelKey string, now time.Time) *m
 	}
 	shard := &modelScheduler{
 		modelKey:        modelKey,
+		providerAuths:   p.auths,
 		entries:         make(map[string]*scheduledAuth),
 		readyByPriority: make(map[int]*readyBucket),
 	}
@@ -1410,7 +1422,7 @@ func (m *modelScheduler) pickReadyAtPriorityLocked(preferWebsocket bool, priorit
 	case schedulerStrategyWeightedRoundRobin:
 		picked = view.pickWeighted(predicate)
 	case schedulerStrategyResetSoonest:
-		picked = view.pickResetSoonest(predicate, time.Now())
+		picked = view.pickResetSoonest(predicate, time.Now(), m.providerAuths)
 	default:
 		picked = view.pickRoundRobin(predicate)
 	}
@@ -1676,18 +1688,23 @@ func (v *readyView) pickFirst(predicate func(*scheduledAuth) bool) *scheduledAut
 	return nil
 }
 
-// pickResetSoonest returns the ready entry whose weekly quota resets soonest.
-func (v *readyView) pickResetSoonest(predicate func(*scheduledAuth) bool, now time.Time) *scheduledAuth {
+// pickResetSoonest returns the ready entry whose weekly quota resets soonest, ranking each
+// credential on its latest metadata so quota observed through another model counts.
+func (v *readyView) pickResetSoonest(predicate func(*scheduledAuth) bool, now time.Time, latest map[string]*scheduledAuthMeta) *scheduledAuth {
 	var best *scheduledAuth
 	var bestKey resetSoonestKey
 	for _, entry := range v.flat {
 		if entry == nil || entry.auth == nil || (predicate != nil && !predicate(entry)) {
 			continue
 		}
+		meta := latest[entry.auth.ID]
+		if meta == nil || meta.auth == nil {
+			meta = entry.meta
+		}
 		var key resetSoonestKey
-		if entry.meta != nil && entry.meta.auth == entry.auth {
-			tier, resetAt := resetSoonestRankFromWindows(entry.auth, entry.meta.quotaWindows, now)
-			key = newResetSoonestKey(entry.auth, tier, resetAt)
+		if meta != nil && meta.auth != nil {
+			tier, resetAt := resetSoonestRankFromWindows(meta.auth, meta.quotaWindows, now)
+			key = newResetSoonestKey(meta.auth, tier, resetAt)
 		} else {
 			key = resetSoonestKeyFor(entry.auth, now)
 		}

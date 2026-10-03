@@ -13,6 +13,10 @@ const clientConfigKeyPlaceholder = "<one of your api-keys>"
 // DoClientConfig prints the settings that point a coding agent at this proxy.
 // It returns a process exit code.
 func DoClientConfig(out io.Writer, cfg *config.Config, client, host string) int {
+	if !validClientHost(host) {
+		_, _ = fmt.Fprintf(out, "invalid client host %q: use a host name, IPv4 address or [IPv6] address\n", host)
+		return 2
+	}
 	baseURL, apiKey, notes := clientConfigEndpoint(cfg, host)
 	switch strings.ToLower(strings.TrimSpace(client)) {
 	case "claude", "claude-code":
@@ -27,6 +31,19 @@ func DoClientConfig(out io.Writer, cfg *config.Config, client, host string) int 
 		_, _ = fmt.Fprintln(out, "# Note: "+note)
 	}
 	return 0
+}
+
+// validClientHost keeps the host safe to paste into TOML and shell output.
+func validClientHost(host string) bool {
+	for _, char := range strings.TrimSpace(host) {
+		switch {
+		case char >= 'a' && char <= 'z', char >= 'A' && char <= 'Z', char >= '0' && char <= '9':
+		case char == '.', char == '-', char == ':', char == '[', char == ']':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func clientConfigEndpoint(cfg *config.Config, host string) (string, string, []string) {

@@ -31,6 +31,20 @@ type QuotaWindow struct {
 	Status string `json:"status,omitempty"`
 }
 
+// Exhausted reports whether the window currently blocks requests. An upstream status wins:
+// Claude reports utilization above 1.0 on windows it still allows. Without a status, a full
+// window counts as exhausted unless it is a Claude per-model or overage window (key with a
+// suffix such as "7d_oi"), which does not block the whole credential.
+func (w QuotaWindow) Exhausted() bool {
+	if w.Status != "" {
+		return w.Status == "rejected"
+	}
+	if strings.Contains(w.Key, "_") {
+		return false
+	}
+	return w.UsedFraction >= 1
+}
+
 const (
 	quotaWindowDayMinutes  = 24 * 60
 	quotaWindowWeekMinutes = 7 * quotaWindowDayMinutes
@@ -252,7 +266,9 @@ func resetSoonestRankFromWindows(auth *Auth, windows []QuotaWindow, now time.Tim
 		return ResetTierUnknown, time.Time{}
 	}
 	if auth.Quota.ObservedAt.IsZero() {
-		if ProviderSupportsQuotaObservation(auth.Provider) && auth.AuthKind() == AuthKindOAuth {
+		// Probe each credential once; one that answers without quota headers must not keep
+		// winning picks, so it drops to unknown after its first completed request.
+		if ProviderSupportsQuotaObservation(auth.Provider) && auth.AuthKind() == AuthKindOAuth && auth.Success+auth.Failed == 0 {
 			return ResetTierDiscover, time.Time{}
 		}
 		return ResetTierUnknown, time.Time{}
@@ -266,24 +282,24 @@ func resetSoonestRankFromWindows(auth *Auth, windows []QuotaWindow, now time.Tim
 		windowLength := time.Duration(window.WindowMinutes) * time.Minute
 		resetAt := window.ResetAt
 		expired := !resetAt.IsZero() && !resetAt.After(now)
+		if !expired && window.Exhausted() {
+			return ResetTierExhausted, time.Time{}
+		}
 		if window.WindowMinutes > 0 && window.WindowMinutes < quotaWindowDayMinutes {
 			if !expired && window.UsedFraction >= resetSoonestShortWindowLimit {
 				return ResetTierExhausted, time.Time{}
 			}
 			continue
 		}
-		if window.WindowMinutes < quotaWindowWeekMinutes || resetAt.IsZero() {
+		// Per-model and overage windows do not decide the credential's own weekly reset.
+		if window.WindowMinutes < quotaWindowWeekMinutes || resetAt.IsZero() || strings.Contains(window.Key, "_") {
 			continue
 		}
 		weeklyKnown = true
-		if expired {
-			// The window already rolled over: quota is full again and the next reset is
-			// roughly one window length after the observed one.
-			for !resetAt.After(now) && windowLength > 0 {
-				resetAt = resetAt.Add(windowLength)
-			}
-		} else if window.UsedFraction >= 1 {
-			continue
+		// A window that already rolled over has full quota again; its next reset is roughly
+		// one window length after the observed one.
+		for expired && !resetAt.After(now) && windowLength > 0 {
+			resetAt = resetAt.Add(windowLength)
 		}
 		weeklyRemaining = true
 		if weeklyReset.IsZero() || resetAt.Before(weeklyReset) {
