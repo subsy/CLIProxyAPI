@@ -3,6 +3,8 @@ package cmd
 import (
 	"fmt"
 	"io"
+	"net"
+	"strconv"
 	"strings"
 
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
@@ -73,7 +75,8 @@ func clientConfigEndpoint(cfg *config.Config, host string) (string, string, []st
 	if host == "localhost" || host == "127.0.0.1" {
 		notes = append(notes, "for another machine (for example over Tailscale), rerun with -client-host <this machine's address>")
 	}
-	return fmt.Sprintf("%s://%s:%d", scheme, host, port), apiKey, notes
+	host = strings.TrimSuffix(strings.TrimPrefix(host, "["), "]")
+	return fmt.Sprintf("%s://%s", scheme, net.JoinHostPort(host, strconv.Itoa(port))), apiKey, notes
 }
 
 func writeClaudeClientConfig(out io.Writer, baseURL, apiKey string) {

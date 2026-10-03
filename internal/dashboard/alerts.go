@@ -149,20 +149,21 @@ func (a *Alerter) Evaluate(auths []*coreauth.Auth) {
 			current[alert.Key] = alert
 		}
 	}
-	var fresh []Alert
-	for key, alert := range current {
-		if _, done := a.notified[key]; !done {
-			// Zero expiry means the alert stays announced until its condition clears.
-			a.notified[key] = alert.ResetAt
-			fresh = append(fresh, alert)
-		}
-	}
+	// Expire first so a window that has reset can alert again in the same evaluation.
 	for key, expiry := range a.notified {
 		_, stillActive := current[key]
 		// Alerts without a reset time (re-login) re-arm once the condition clears; quota alerts
 		// stay quiet for the rest of their window even if the condition dips in and out.
 		if (expiry.IsZero() && !stillActive) || (!expiry.IsZero() && now.After(expiry)) {
 			delete(a.notified, key)
+		}
+	}
+	var fresh []Alert
+	for key, alert := range current {
+		if _, done := a.notified[key]; !done {
+			// Zero expiry means the alert stays announced until its condition clears.
+			a.notified[key] = alert.ResetAt
+			fresh = append(fresh, alert)
 		}
 	}
 	a.active = current
@@ -219,9 +220,9 @@ func alertsForAuth(auth *coreauth.Auth, settings alertSettings, pools map[string
 		return Alert{Kind: kind, Key: kind + ":" + auth.ID + key, Provider: provider, AuthID: auth.ID, Account: account,
 			Title: title, Message: message, ResetAt: resetAt, Since: now}
 	}
-	windowKey := func(window coreauth.QuotaWindow) string {
-		return fmt.Sprintf(":%s:%d", window.Key, window.ResetAt.Unix())
-	}
+	// The reset time stays out of the key: Codex derives it from reset-after-seconds, so it
+	// jitters between responses. Each announcement expires at its reset instead.
+	windowKey := func(window coreauth.QuotaWindow) string { return ":" + window.Key }
 	var alerts []Alert
 	if needs, reason := NeedsRelogin(auth); needs {
 		alerts = append(alerts, newAlert(alertKindRelogin, "", name+" account needs a new login",

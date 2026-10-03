@@ -39,7 +39,10 @@ func TestDoClientConfig(t *testing.T) {
 	if code := DoClientConfig(&bytes.Buffer{}, cfg, "codex", "evil\"\nmodel = \"x"); code != 2 {
 		t.Fatalf("host with quotes and newlines exit = %d, want 2", code)
 	}
-	if code := DoClientConfig(&bytes.Buffer{}, cfg, "codex", "[fd7a::1]"); code != 0 {
-		t.Fatalf("IPv6 host exit = %d, want 0", code)
+	for _, host := range []string{"[fd7a::1]", "fd7a::1"} {
+		var ipv6 bytes.Buffer
+		if code := DoClientConfig(&ipv6, cfg, "codex", host); code != 0 || !strings.Contains(ipv6.String(), `base_url = "https://[fd7a::1]:9000/v1"`) {
+			t.Fatalf("IPv6 host %q: exit %d, output:\n%s", host, code, ipv6.String())
+		}
 	}
 }

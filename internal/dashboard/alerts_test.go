@@ -291,3 +291,27 @@ func TestClaudeOverageWindowDoesNotCountAsUsedUp(t *testing.T) {
 		t.Fatalf("exhausted = %+v, want none for an allowed overage window", got)
 	}
 }
+
+func TestAlerterKeyIgnoresResetJitter(t *testing.T) {
+	now := time.Now()
+	alerter, delivered := newTestAlerter(&now)
+	alerter.Configure(config.RoutingAlertsConfig{WebhookURL: "http://example.invalid"})
+	codex := func(resetAfter string) *coreauth.Auth {
+		auth := oauthAuth("c", "codex")
+		auth.Quota = coreauth.QuotaState{ObservedAt: now, Signals: map[string]string{
+			"X-Codex-Primary-Used-Percent":        "100",
+			"X-Codex-Primary-Window-Minutes":      "300",
+			"X-Codex-Primary-Reset-After-Seconds": resetAfter,
+		}}
+		return auth
+	}
+	alerter.Evaluate([]*coreauth.Auth{codex("3600")})
+	receiveAlert(t, delivered)
+	now = now.Add(1500 * time.Millisecond)
+	alerter.Evaluate([]*coreauth.Auth{codex("3598")})
+	select {
+	case extra := <-delivered:
+		t.Fatalf("re-announced the same window after a one-second reset jitter: %+v", extra)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
