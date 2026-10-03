@@ -22,6 +22,7 @@ const (
 	schedulerStrategyRoundRobin         schedulerStrategy = 1
 	schedulerStrategyFillFirst          schedulerStrategy = 2
 	schedulerStrategyWeightedRoundRobin schedulerStrategy = 3
+	schedulerStrategyResetSoonest       schedulerStrategy = 4
 )
 
 // scheduledState describes how an auth currently participates in a model shard.
@@ -68,11 +69,16 @@ type scheduledAuthMeta struct {
 	websocketEnabled  bool
 	supportedModelSet map[string]struct{}
 	registryEpoch     uint64
+	// quotaWindows caches the parsed quota snapshot for reset-soonest picks.
+	quotaWindows []QuotaWindow
 }
 
 // modelScheduler tracks ready and blocked auths for one provider/model combination.
 type modelScheduler struct {
-	modelKey        string
+	modelKey string
+	// providerAuths is the owning provider's latest metadata by auth ID. Results only refresh
+	// the targeted shards, so ranking reads quota from here to see every observation.
+	providerAuths   map[string]*scheduledAuthMeta
 	entries         map[string]*scheduledAuth
 	priorityOrder   []int
 	readyByPriority map[int]*readyBucket
@@ -170,6 +176,8 @@ func selectorStrategy(selector Selector) schedulerStrategy {
 		return schedulerStrategyFillFirst
 	case *WeightedRoundRobinSelector:
 		return schedulerStrategyWeightedRoundRobin
+	case *ResetSoonestSelector:
+		return schedulerStrategyResetSoonest
 	case nil, *RoundRobinSelector:
 		return schedulerStrategyRoundRobin
 	default:
@@ -514,6 +522,32 @@ func (s *authScheduler) pickMixedWithStrategy(ctx context.Context, providers []s
 		}
 	}
 	if !hasCandidate {
+		return nil, "", s.mixedUnavailableErrorLocked(normalized, model, predicate)
+	}
+
+	if strategy == schedulerStrategyResetSoonest {
+		entries := make([]*scheduledAuth, 0)
+		for _, shard := range candidateShards {
+			if shard == nil {
+				continue
+			}
+			if bucket := shard.readyByPriority[bestPriority]; bucket != nil {
+				entries = append(entries, bucket.all.flat...)
+			}
+		}
+		latest := make(map[string]*scheduledAuthMeta)
+		for _, providerKey := range normalized {
+			if providerState := s.providers[providerKey]; providerState != nil {
+				for id, meta := range providerState.auths {
+					latest[id] = meta
+				}
+			}
+		}
+		view := readyView{flat: entries}
+		picked := view.pickResetSoonest(predicate, now, latest)
+		if picked != nil && picked.meta != nil {
+			return picked.auth, picked.meta.providerKey, nil
+		}
 		return nil, "", s.mixedUnavailableErrorLocked(normalized, model, predicate)
 	}
 
@@ -1053,7 +1087,15 @@ func buildScheduledAuthMetaWithModelSet(auth *Auth, modelSet map[string]struct{}
 		websocketEnabled:  authWebsocketsEnabled(auth),
 		supportedModelSet: modelSet,
 		registryEpoch:     regEpoch,
+		quotaWindows:      quotaWindowsForMeta(clonedAuth),
 	}
+}
+
+func quotaWindowsForMeta(auth *Auth) []QuotaWindow {
+	if auth == nil {
+		return nil
+	}
+	return parseQuotaWindowsUnsorted(auth.Provider, auth.Quota)
 }
 
 // supportedModelSetForAuth snapshots the registry models currently registered for an auth.
@@ -1167,6 +1209,7 @@ func (p *providerScheduler) ensureModelLocked(modelKey string, now time.Time) *m
 	}
 	shard := &modelScheduler{
 		modelKey:        modelKey,
+		providerAuths:   p.auths,
 		entries:         make(map[string]*scheduledAuth),
 		readyByPriority: make(map[int]*readyBucket),
 	}
@@ -1378,6 +1421,8 @@ func (m *modelScheduler) pickReadyAtPriorityLocked(preferWebsocket bool, priorit
 		picked = view.pickFirst(predicate)
 	case schedulerStrategyWeightedRoundRobin:
 		picked = view.pickWeighted(predicate)
+	case schedulerStrategyResetSoonest:
+		picked = view.pickResetSoonest(predicate, time.Now(), m.providerAuths)
 	default:
 		picked = view.pickRoundRobin(predicate)
 	}
@@ -1641,6 +1686,33 @@ func (v *readyView) pickFirst(predicate func(*scheduledAuth) bool) *scheduledAut
 		}
 	}
 	return nil
+}
+
+// pickResetSoonest returns the ready entry whose weekly quota resets soonest, ranking each
+// credential on its latest metadata so quota observed through another model counts.
+func (v *readyView) pickResetSoonest(predicate func(*scheduledAuth) bool, now time.Time, latest map[string]*scheduledAuthMeta) *scheduledAuth {
+	var best *scheduledAuth
+	var bestKey resetSoonestKey
+	for _, entry := range v.flat {
+		if entry == nil || entry.auth == nil || (predicate != nil && !predicate(entry)) {
+			continue
+		}
+		meta := latest[entry.auth.ID]
+		if meta == nil || meta.auth == nil {
+			meta = entry.meta
+		}
+		var key resetSoonestKey
+		if meta != nil && meta.auth != nil {
+			tier, resetAt := resetSoonestRankFromWindows(meta.auth, meta.quotaWindows, now)
+			key = newResetSoonestKey(meta.auth, tier, resetAt)
+		} else {
+			key = resetSoonestKeyFor(entry.auth, now)
+		}
+		if best == nil || key.less(bestKey) {
+			best, bestKey = entry, key
+		}
+	}
+	return best
 }
 
 // pickRoundRobin returns the next ready entry using flat round-robin traversal.

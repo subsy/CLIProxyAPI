@@ -1,0 +1,631 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CLIProxyAPI · Routing dashboard</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f4f5f7; --panel: #ffffff; --panel-2: #f9fafb; --ink: #15171c; --muted: #5b6270; --faint: #8a919d;
+    --line: #e2e5ea; --track: #e9ecf0; --grid: #eef0f3;
+    --ok: #2b7a57; --warn: #a86a12; --bad: #c03a33; --accent: #2f54d0;
+    --accent-soft: #e7ecfc; --warn-soft: #fbf2e1; --bad-soft: #fbebea; --info-soft: #ebf1fa; --ok-soft: #e4f3ec;
+    --claude: #d97757; --openai: #10a37f; --gemini: #8e75b2;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1115; --panel: #161920; --panel-2: #1a1e26; --ink: #e7e9ee; --muted: #a0a7b3; --faint: #737b88;
+      --line: #262a33; --track: #232831; --grid: #1d2129;
+      --ok: #4bb184; --warn: #e0a447; --bad: #ee6b62; --accent: #8ba5ff;
+      --accent-soft: #1c2542; --warn-soft: #2c2415; --bad-soft: #2f1a19; --info-soft: #172234; --ok-soft: #14271f;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { scrollbar-color: var(--faint) transparent; }
+  ::selection { background: var(--accent-soft); color: var(--ink); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; font-variant-numeric: tabular-nums; }
+  a { color: var(--accent); text-underline-offset: 3px; }
+  button, input { font: inherit; }
+  button { border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 6px;
+    padding: 5px 11px; cursor: pointer; transition: border-color .15s, background-color .15s; }
+  button:hover { border-color: var(--accent); }
+  button:disabled { opacity: .55; cursor: progress; }
+  .logo { width: 18px; height: 18px; flex: none; display: block; }
+  .logo.claude { color: var(--claude); } .logo.codex { color: var(--ink); } .logo.gemini { color: var(--gemini); }
+  .logo.generic { color: var(--faint); }
+
+  header { position: sticky; top: 0; z-index: 5; display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center;
+    padding: 12px 24px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--panel) 92%, transparent);
+    backdrop-filter: saturate(1.4) blur(8px); }
+  header h1 { font-size: 16px; margin: 0; font-weight: 650; }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; }
+  .chip { border: 1px solid var(--line); border-radius: 999px; padding: 1px 10px; font-size: 12.5px; color: var(--muted); }
+  .chip b { color: var(--ink); font-weight: 600; }
+  .spacer { flex: 1; }
+  .meta { color: var(--muted); font-size: 12.5px; }
+  main { max-width: 1320px; margin: 0 auto; padding: 18px 24px 56px; }
+  h2 { font-size: 15px; font-weight: 650; margin: 0; }
+  .section-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin: 28px 0 10px; }
+  .section-head .meta { max-width: 75ch; }
+
+  .notice { border-radius: 8px; padding: 10px 14px; margin-bottom: 8px; border: 1px solid var(--line); max-width: 110ch; }
+  .notice.warning { background: var(--warn-soft); border-color: color-mix(in srgb, var(--warn) 35%, transparent); }
+  .notice.info { background: var(--info-soft); }
+  .notice.error { background: var(--bad-soft); border-color: color-mix(in srgb, var(--bad) 35%, transparent); }
+
+  .status-line { display: flex; flex-wrap: wrap; gap: 6px 22px; margin: 4px 0 0; padding: 0; list-style: none; color: var(--muted); font-size: 13px; }
+  .status-line b { color: var(--ink); font-weight: 600; }
+
+  /* Draw-down lanes */
+  .lanes { display: grid; gap: 12px; }
+  .lane { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
+  .lane-head { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+  .lane-head h3 { margin: 0; font-size: 14px; font-weight: 650; }
+  .lane-head .meta { margin-left: auto; }
+  .queue { display: flex; align-items: stretch; gap: 0; overflow-x: auto; padding-bottom: 4px; }
+  .slot { flex: none; width: 236px; border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; background: var(--panel-2); }
+  .slot.now { border-color: var(--accent); background: var(--accent-soft); box-shadow: 0 2px 10px -4px color-mix(in srgb, var(--accent) 45%, transparent); }
+  .slot.next { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+  .slot-role { display: flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 650; color: var(--muted); letter-spacing: .02em; }
+  .slot.now .slot-role { color: var(--accent); }
+  .slot-acct { font-weight: 600; margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .slot-win { display: grid; grid-template-columns: 38px 1fr; gap: 2px 8px; align-items: center; margin-top: 8px; }
+  .slot-win .wl { font-size: 11.5px; color: var(--muted); }
+  .slot-win .wd { grid-column: 2; font-size: 12px; color: var(--muted); }
+  .slot-sub { font-size: 12px; color: var(--muted); margin-top: 6px; }
+  .live { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 2px color-mix(in srgb, var(--ok) 22%, transparent); }
+  .arrow { flex: none; align-self: center; width: 28px; display: flex; justify-content: center; color: var(--faint); }
+  .arrow svg { width: 14px; height: 14px; }
+  .parked { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--line); font-size: 12.5px; }
+  .parked-label { color: var(--muted); margin-right: 4px; }
+  .pill { display: inline-flex; gap: 6px; align-items: center; border: 1px solid var(--line); border-radius: 999px; padding: 1px 10px; font-size: 12px; color: var(--muted); white-space: nowrap; }
+  .pill b { color: var(--ink); font-weight: 600; }
+  .pill.warn { border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
+  .pill.bad { border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
+  .lane-empty { color: var(--muted); font-size: 13px; }
+
+  /* Meters */
+  .meter { position: relative; height: 6px; border-radius: 3px; background: var(--track); }
+  .meter > i { position: absolute; inset: 0 auto 0 0; border-radius: 3px; background: var(--ok); }
+  .meter > i.warn { background: var(--warn); } .meter > i.bad { background: var(--bad); }
+  .meter > b { position: absolute; top: -3px; bottom: -3px; width: 2px; border-radius: 1px; background: var(--ink); opacity: .5; }
+
+  /* Reset timeline */
+  .timeline { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow-x: auto; }
+  .tl { min-width: 860px; position: relative; }
+  .tl-row { display: grid; grid-template-columns: 250px 1fr; border-bottom: 1px solid var(--line); }
+  .tl-row:last-child { border-bottom: 0; }
+  .tl-row.group { background: var(--panel-2); }
+  .tl-label { position: sticky; left: 0; z-index: 2; background: inherit; display: flex; gap: 8px; align-items: flex-start;
+    padding: 9px 12px; border-right: 1px solid var(--line); min-width: 0; }
+  .tl-row:not(.group) .tl-label { background: var(--panel); }
+  .tl-label .who { min-width: 0; }
+  .tl-label .who div { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tl-label .who .sub { font-size: 11.5px; color: var(--muted); }
+  .order-badge { flex: none; min-width: 26px; text-align: center; font-size: 11.5px; font-weight: 650; border-radius: 5px; padding: 1px 4px;
+    border: 1px solid var(--line); color: var(--muted); margin-top: 1px; }
+  .order-badge.now { background: var(--accent); border-color: var(--accent); color: var(--panel); }
+  .order-badge.next { border-color: var(--accent); color: var(--accent); }
+  .tl-track { position: relative; min-height: 50px; overflow: hidden; }
+  .tl-axis-row .tl-track { overflow: visible; }
+  .tl-axis { height: 30px; }
+  .tick { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--grid); }
+  .tick-label { position: absolute; top: 7px; font-size: 11.5px; color: var(--muted); transform: translateX(6px); white-space: nowrap; }
+  .now-line { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--accent); z-index: 1; pointer-events: none; }
+  .now-tag { position: absolute; top: 6px; transform: translateX(-50%); font-size: 11px; font-weight: 650; color: var(--panel);
+    background: var(--accent); border-radius: 4px; padding: 0 6px; z-index: 3; }
+  .period { position: absolute; height: 14px; border-radius: 4px; overflow: hidden; background: color-mix(in srgb, var(--ok) 65%, var(--track)); }
+  .period.warn { background: color-mix(in srgb, var(--warn) 70%, var(--track)); }
+  .period.bad { background: color-mix(in srgb, var(--bad) 70%, var(--track)); }
+  .period.week { top: 9px; }
+  .period.five { top: 31px; height: 7px; border-radius: 3px; }
+  .period > .elapsed { position: absolute; inset: 0 auto 0 0; background: color-mix(in srgb, var(--faint) 28%, var(--track)); }
+  .period.next { background: transparent; border: 1px dashed color-mix(in srgb, var(--ok) 60%, var(--line)); }
+  .period.estimated { background: transparent; border: 1px dashed var(--faint); }
+  .period-text { position: absolute; top: 8px; z-index: 1; font-size: 11.5px; line-height: 16px; white-space: nowrap; color: var(--ink); pointer-events: none;
+    background: var(--panel); border-radius: 4px; padding: 0 5px; }
+  .reset-mark { position: absolute; top: 5px; width: 2px; height: 22px; margin-left: -1px; background: var(--ink); border-radius: 1px; }
+  .tl-note { position: absolute; top: 9px; left: 12px; font-size: 12px; color: var(--muted); }
+  .tl-legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 12px; color: var(--muted); margin-top: 8px; }
+  .tl-legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .key { display: inline-block; width: 22px; height: 9px; border-radius: 3px; }
+  .key.used { background: color-mix(in srgb, var(--faint) 28%, var(--track)); }
+  .key.left { background: linear-gradient(90deg, color-mix(in srgb, var(--ok) 65%, var(--track)) 0 33%, color-mix(in srgb, var(--warn) 70%, var(--track)) 33% 66%, color-mix(in srgb, var(--bad) 70%, var(--track)) 66%); }
+  .key.next { border: 1px dashed color-mix(in srgb, var(--ok) 60%, var(--line)); }
+  .key.five { height: 5px; background: color-mix(in srgb, var(--ok) 65%, var(--track)); }
+
+  /* Account detail */
+  section.group { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; margin-bottom: 14px; overflow: hidden; }
+  .group-head { display: flex; align-items: center; gap: 8px; padding: 11px 16px; border-bottom: 1px solid var(--line); }
+  .group-head h3 { margin: 0; font-size: 14px; font-weight: 650; }
+  .group-head .meta { margin-left: auto; }
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; font-weight: 550; color: var(--muted); font-size: 12px; padding: 8px 12px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  td { padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tr:last-child td { border-bottom: 0; }
+  tr.inactive td { opacity: .6; }
+  .acct { min-width: 220px; }
+  .acct .name { font-weight: 600; word-break: break-all; }
+  .acct .sub { color: var(--muted); font-size: 12px; word-break: break-all; }
+  .badges { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 5px; }
+  .badge { font-size: 11px; border-radius: 4px; padding: 0 6px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+  .badge.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
+  .badge.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
+  .badge.bad { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
+  .badge.accent { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+  .windows { min-width: 320px; }
+  .win { display: grid; grid-template-columns: 120px 1fr; gap: 3px 10px; align-items: center; margin-bottom: 8px; }
+  .win:last-child { margin-bottom: 0; }
+  .win .wl { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .win .wd { grid-column: 2; font-size: 12px; color: var(--muted); }
+  .waste { color: var(--warn); font-weight: 600; }
+  .num { white-space: nowrap; }
+  .num .sub { color: var(--muted); font-size: 12px; }
+  .empty { color: var(--muted); font-size: 12.5px; }
+  details.help { margin-top: 26px; color: var(--muted); font-size: 13px; max-width: 110ch; }
+  details.help summary { cursor: pointer; color: var(--ink); font-weight: 600; }
+  details.help p { margin: 8px 0; }
+  details.help b { color: var(--ink); font-weight: 600; }
+
+  .connect { max-width: 440px; margin: 64px auto; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 20px; }
+  .connect h2 { margin-bottom: 6px; }
+  .connect input { width: 100%; padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--ink); margin: 12px 0; }
+  .connect .row { display: flex; justify-content: flex-end; }
+  .skeleton { height: 96px; border-radius: 10px; background: linear-gradient(90deg, var(--panel) 0%, var(--panel-2) 50%, var(--panel) 100%); border: 1px solid var(--line); }
+  [hidden] { display: none !important; }
+  @media (max-width: 720px) {
+    header, main { padding-left: 14px; padding-right: 14px; }
+    .slot { width: 210px; }
+    .tl-row { grid-template-columns: 170px 1fr; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Routing dashboard</h1>
+  <div class="chips" id="chips"></div>
+  <div class="spacer"></div>
+  <span class="meta" id="updated" aria-live="polite"></span>
+  <button id="refresh" type="button">Refresh</button>
+  <a href="/management.html">Manage accounts</a>
+  <button id="forget" type="button" title="Remove the stored management key from this browser">Forget key</button>
+</header>
+<main>
+  <form class="connect" id="connect" hidden>
+    <h2>Connect with your management key</h2>
+    <div class="meta">This is the <code>remote-management</code> secret from your config. It is kept only in this browser and sent to this proxy’s management API.</div>
+    <input id="keyInput" type="password" autocomplete="current-password" placeholder="Management key" required aria-label="Management key">
+    <div class="row"><button type="submit">Connect</button></div>
+  </form>
+  <div id="app" hidden>
+    <div id="notices"></div>
+    <ul class="status-line" id="statusLine"></ul>
+
+    <div class="section-head"><h2>Draw-down order</h2>
+      <span class="meta" id="lanesNote"></span></div>
+    <div class="lanes" id="lanes"></div>
+
+    <div class="section-head"><h2>Reset timeline</h2>
+      <span class="meta">Each account’s weekly and 5-hour quota windows, from one day ago to seven days ahead.</span></div>
+    <div class="timeline" id="timeline"></div>
+    <div class="tl-legend">
+      <span><i class="key used"></i>part of the weekly window already gone</span>
+      <span><i class="key left"></i>time left before reset, coloured by quota used (under 80%, 80–98%, above 98%)</span>
+      <span><i class="key next"></i>next window after reset (full quota)</span>
+      <span><i class="key five"></i>current 5-hour window</span>
+    </div>
+
+    <div class="section-head"><h2>Accounts</h2></div>
+    <div id="groups"></div>
+
+    <details class="help">
+      <summary>How to read this</summary>
+      <p><b>Draw-down order</b> is the order the current strategy tries accounts in. With <b>reset-soonest</b>, the account whose weekly window resets first is drained first, because its remaining quota is lost at reset. Accounts not seen since start-up get one request so their reset time is learned. Accounts whose 5-hour window is nearly full are moved to the back. With round-robin, all usable accounts share traffic evenly.</p>
+      <p>A green dot marks an account that served a request in the last three minutes.</p>
+      <p><b>Expires unused</b> is the share of a weekly window that would be lost at reset if usage continues at the current pace. The thin marker on a meter shows where usage is heading by reset.</p>
+      <p><b>Prompt cache hit</b> is the share of cached prompt tokens read from the cache rather than written. Each time a session switches accounts, its cache is rebuilt on the new account.</p>
+    </details>
+  </div>
+  <div id="loading"><div class="skeleton"></div></div>
+</main>
+<script>
+(() => {
+  "use strict";
+  const STORAGE_KEY = "cpa-routing-dashboard-key";
+  const REFRESH_MS = 30000;
+  const LIVE_MS = 3 * 60 * 1000;
+  const DAY = 86400000, HOUR = 3600000;
+  const SVG_NS = "http://www.w3.org/2000/svg";
+  const $ = (id) => document.getElementById(id);
+
+  // Provider marks from Simple Icons (CC0). Trademarks belong to their owners.
+  const LOGOS = {
+    claude: "m4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307l-.7893-.0486-2.6956-.0729-2.3375-.0971-2.2646-.1214-.5707-.1215-.5343-.7042.0546-.3522.4797-.3218.686.0608 1.5179.1032 2.2767.1578 1.6514.0972 2.4468.255h.3886l.0546-.1579-.1336-.0971-.1032-.0972L6.973 9.8356l-2.55-1.6879-1.3356-.9714-.7225-.4918-.3643-.4614-.1578-1.0078.6557-.7225.8803.0607.2246.0607.8925.686 1.9064 1.4754 2.4893 1.8336.3643.3035.1457-.1032.0182-.0728-.164-.2733-1.3539-2.4467-1.445-2.4893-.6435-1.032-.17-.6194c-.0607-.255-.1032-.4674-.1032-.7285L6.287.1335 6.6997 0l.9957.1336.419.3642.6192 1.4147 1.0018 2.2282 1.5543 3.0296.4553.8985.2429.8318.091.255h.1579v-.1457l.1275-1.706.2368-2.0947.2307-2.6957.0789-.7589.3764-.9107.7468-.4918.5828.2793.4797.686-.0668.4433-.2853 1.8517-.5586 2.9021-.3643 1.9429h.2125l.2429-.2429.9835-1.3053 1.6514-2.0643.7286-.8196.85-.9046.5464-.4311h1.0321l.759 1.1293-.34 1.1657-1.0625 1.3478-.8804 1.1414-1.2628 1.7-.7893 1.36.0729.1093.1882-.0183 2.8535-.607 1.5421-.2794 1.8396-.3157.8318.3886.091.3946-.3278.8075-1.967.4857-2.3072.4614-3.4364.8136-.0425.0304.0486.0607 1.5482.1457.6618.0364h1.621l3.0175.2247.7892.522.4736.6376-.079.4857-1.2142.6193-1.6393-.3886-3.825-.9107-1.3113-.3279h-.1822v.1093l1.0929 1.0686 2.0035 1.8092 2.5075 2.3314.1275.5768-.3218.4554-.34-.0486-2.2039-1.6575-.85-.7468-1.9246-1.621h-.1275v.17l.4432.6496 2.3436 3.5214.1214 1.0807-.17.3521-.6071.2125-.6679-.1214-1.3721-1.9246L14.38 17.959l-1.1414-1.9428-.1397.079-.674 7.2552-.3156.3703-.7286.2793-.6071-.4614-.3218-.7468.3218-1.4753.3886-1.9246.3157-1.53.2853-1.9004.17-.6314-.0121-.0425-.1397.0182-1.4328 1.9672-2.1796 2.9446-1.7243 1.8456-.4128.164-.7164-.3704.0667-.6618.4008-.5889 2.386-3.0357 1.4389-1.882.929-1.0868-.0062-.1579h-.0546l-6.3385 4.1164-1.1293.1457-.4857-.4554.0608-.7467.2307-.2429 1.9064-1.3114Z",
+    codex: "M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z",
+    gemini: "M11.04 19.32Q12 21.51 12 24q0-2.49.93-4.68.96-2.19 2.58-3.81t3.81-2.55Q21.51 12 24 12q-2.49 0-4.68-.93a12.3 12.3 0 0 1-3.81-2.58 12.3 12.3 0 0 1-2.58-3.81Q12 2.49 12 0q0 2.49-.96 4.68-.93 2.19-2.55 3.81a12.3 12.3 0 0 1-3.81 2.58Q2.49 12 0 12q2.49 0 4.68.96 2.19.93 3.81 2.55t2.55 3.81",
+  };
+  LOGOS["gemini-cli"] = LOGOS.gemini; LOGOS.vertex = LOGOS.gemini; LOGOS.aistudio = LOGOS.gemini; LOGOS.openai = LOGOS.codex;
+  const PROVIDER_NAMES = { claude: "Claude", codex: "Codex", gemini: "Gemini", "gemini-cli": "Gemini CLI", vertex: "Vertex", aistudio: "AI Studio", openai: "OpenAI" };
+  const providerName = (p) => PROVIDER_NAMES[p] || p;
+
+  const svg = (tag, attrs, ...children) => {
+    const node = document.createElementNS(SVG_NS, tag);
+    for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
+    node.append(...children);
+    return node;
+  };
+  function logo(provider) {
+    const path = LOGOS[provider];
+    const family = provider === "openai" ? "codex" : (provider || "").startsWith("gemini") || provider === "vertex" || provider === "aistudio" ? "gemini" : provider;
+    if (!path) {
+      return svg("svg", { class: "logo generic", viewBox: "0 0 24 24", "aria-hidden": "true" },
+        svg("rect", { x: "3", y: "3", width: "18", height: "18", rx: "5", fill: "none", stroke: "currentColor", "stroke-width": "2" }));
+    }
+    return svg("svg", { class: "logo " + family, viewBox: "0 0 24 24", role: "img", "aria-label": providerName(provider) },
+      svg("path", { d: path, fill: "currentColor" }));
+  }
+  const chevron = () => svg("svg", { viewBox: "0 0 16 16", "aria-hidden": "true" },
+    svg("path", { d: "M6 3.5 10.5 8 6 12.5", fill: "none", stroke: "currentColor", "stroke-width": "1.6", "stroke-linecap": "round", "stroke-linejoin": "round" }));
+
+  const el = (tag, attrs = {}, ...children) => {
+    const node = document.createElement(tag);
+    for (const [key, value] of Object.entries(attrs)) {
+      if (value === undefined || value === null || value === false) continue;
+      if (key === "class") node.className = value;
+      else node.setAttribute(key, value);
+    }
+    for (const child of children.flat(Infinity)) {
+      if (child === undefined || child === null || child === false) continue;
+      node.append(child instanceof Node ? child : document.createTextNode(String(child)));
+    }
+    return node;
+  };
+
+  const pct = (f) => (f * 100).toFixed(f >= 0.1 || f === 0 ? 0 : 1) + "%";
+  const compact = (n) => {
+    n = Number(n || 0);
+    if (n >= 1e9) return (n / 1e9).toFixed(1) + "B";
+    if (n >= 1e6) return (n / 1e6).toFixed(1) + "M";
+    if (n >= 1e3) return (n / 1e3).toFixed(1) + "k";
+    return String(Math.round(n));
+  };
+  const duration = (ms) => {
+    const m = Math.round(Math.abs(ms) / 60000);
+    if (m < 60) return m + "m";
+    const h = Math.floor(m / 60);
+    if (h < 48) return h + "h " + (m % 60) + "m";
+    return Math.floor(h / 24) + "d " + (h % 24) + "h";
+  };
+  const isSet = (t) => Boolean(t) && !String(t).startsWith("0001-");
+  const ts = (t) => new Date(t).getTime();
+  const until = (t) => {
+    if (!isSet(t)) return "";
+    const ms = ts(t) - Date.now();
+    return ms >= 0 ? "resets in " + duration(ms) : "reset " + duration(ms) + " ago";
+  };
+  const when = (t) => new Date(t).toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit" });
+  const usable = (c) => !c.disabled && !c.unavailable;
+  const isLive = (c) => isSet(c.usage && c.usage.last_used) && Date.now() - ts(c.usage.last_used) < LIVE_MS;
+  const accountName = (c) => c.email || c.name;
+  const level = (used) => used >= 0.98 ? "bad" : used >= 0.8 ? "warn" : "";
+  const ordered = (strategy) => strategy === "reset-soonest" || strategy === "fill-first";
+
+  // The weekly window that routing cares about: the credential's own longest window.
+  function weeklyWindow(c) {
+    return c.windows.filter((w) => !w.limit && w.window_minutes >= 1440 && isSet(w.reset_at))
+      .sort((a, b) => (a.key === "7d" || a.key === "primary" ? -1 : 0) - (b.key === "7d" || b.key === "primary" ? -1 : 0))[0];
+  }
+  const fiveHourWindow = (c) => c.windows.find((w) => !w.limit && w.window_minutes > 0 && w.window_minutes < 1440 && isSet(w.reset_at));
+
+  function meter(used, projected) {
+    const node = el("div", { class: "meter", role: "img", "aria-label": used >= 0 ? pct(used) + " used" : "usage unknown" },
+      el("i", { class: level(used), style: "width:" + Math.min(100, Math.max(0, used >= 0 ? used * 100 : 0)) + "%" }));
+    if (typeof projected === "number") node.append(el("b", { style: "left:calc(" + Math.min(100, projected * 100) + "% - 1px)", title: "heading for " + pct(projected) + " by reset" }));
+    return node;
+  }
+
+  function parkedReason(c) {
+    if (c.disabled) return ["bad", "disabled"];
+    if (c.needs_relogin) return ["bad", "needs a new login"];
+    if (c.unavailable) return ["warn", "cooling down" + (isSet(c.retry_at) ? ", back in " + duration(ts(c.retry_at) - Date.now()) : "")];
+    if (c.routing_tier === "exhausted") {
+      const f = fiveHourWindow(c);
+      if (f && f.used_fraction >= 0.98 && ts(f.reset_at) > Date.now()) return ["bad", "5-hour limit reached, back in " + duration(ts(f.reset_at) - Date.now())];
+      return ["bad", "weekly quota used up"];
+    }
+    return null;
+  }
+
+  /* ---------- Draw-down lanes ---------- */
+  function slotWindow(label, w, projected) {
+    const used = Math.max(0, w.used_fraction);
+    return el("div", { class: "slot-win", title: label + " window resets " + when(w.reset_at) },
+      el("span", { class: "wl" }, label), meter(w.used_fraction, projected),
+      el("div", { class: "wd" }, pct(used) + " used · " + until(w.reset_at)));
+  }
+
+  function slot(c, role, strategy) {
+    const w = weeklyWindow(c);
+    const f = fiveHourWindow(c);
+    const roleText = { now: ordered(strategy) ? "Drawing now" : "In rotation", next: "Next", later: "Then" }[role] || role;
+    let note = null;
+    if (!w && !f) note = c.routing_tier === "discover" ? "Learns its reset times on the next request." : "No quota data from this provider.";
+    return el("div", { class: "slot " + role },
+      el("div", { class: "slot-role" }, isLive(c) ? el("span", { class: "live", title: "served a request in the last 3 minutes" }) : null,
+        roleText, role === "later" ? " · #" + (c.queuePosition || c.routing_order) : null),
+      el("div", { class: "slot-acct", title: accountName(c) }, accountName(c)),
+      w ? slotWindow("Week", w, w.projected_used_at_reset) : null,
+      f && ts(f.reset_at) > Date.now() ? slotWindow("5h", f) : null,
+      note ? el("div", { class: "slot-sub" }, note) : null);
+  }
+
+  function renderLane(provider, credentials, strategy) {
+    const active = credentials.filter((c) => usable(c) && c.routing_tier !== "exhausted");
+    const parked = credentials.filter((c) => !active.includes(c));
+    const queue = el("div", { class: "queue" });
+    if (!active.length) {
+      queue.append(el("div", { class: "lane-empty" }, "No account can take requests right now."));
+    } else if (ordered(strategy)) {
+      active.forEach((c, i) => {
+        if (i) queue.append(el("div", { class: "arrow" }, chevron()));
+        c.queuePosition = i + 1;
+        queue.append(slot(c, i === 0 ? "now" : i === 1 ? "next" : "later", strategy));
+      });
+    } else {
+      active.forEach((c, i) => {
+        if (i) queue.append(el("div", { class: "arrow", style: "width:10px" }));
+        queue.append(slot(c, "now", strategy));
+      });
+    }
+    const parkedRow = parked.length ? el("div", { class: "parked" }, el("span", { class: "parked-label" }, "Set aside"),
+      parked.map((c) => {
+        const [cls, reason] = parkedReason(c) || ["", "unavailable"];
+        return el("span", { class: "pill " + cls, title: c.status_message || "" }, el("b", {}, accountName(c)), reason);
+      })) : null;
+    return el("div", { class: "lane" },
+      el("div", { class: "lane-head" }, logo(provider), el("h3", {}, providerName(provider)),
+        el("span", { class: "meta" }, active.length + " active · " + parked.length + " set aside")),
+      queue, parkedRow);
+  }
+
+  /* ---------- Reset timeline ---------- */
+  function renderTimeline(data, strategy) {
+    const now = Date.now();
+    const start = now - DAY, end = now + 7 * DAY, span = end - start;
+    const x = (t) => ((Math.min(end, Math.max(start, t)) - start) / span) * 100;
+    // Unclamped position: windows that began before the visible range keep their true width
+    // and are cropped by the track, so the used share stays proportional to the whole window.
+    const xu = (t) => ((t - start) / span) * 100;
+    const grid = [];
+    const firstMidnight = new Date(start); firstMidnight.setHours(24, 0, 0, 0);
+    for (let t = firstMidnight.getTime(); t < end; t += DAY) {
+      grid.push({ left: x(t), nearNow: Math.abs(t - now) < 0.3 * DAY, label: new Date(t).toLocaleDateString([], { weekday: "short", day: "numeric" }) });
+    }
+    const gridLines = () => grid.map((g) => el("div", { class: "tick", style: "left:" + g.left + "%" }));
+    const nowLine = () => el("div", { class: "now-line", style: "left:" + x(now) + "%" });
+
+    const rows = [el("div", { class: "tl-row tl-axis-row" },
+      el("div", { class: "tl-label meta" }, "Account"),
+      el("div", { class: "tl-track tl-axis" }, gridLines(),
+        grid.filter((g) => !g.nearNow).map((g) => el("span", { class: "tick-label", style: "left:" + g.left + "%" }, g.label)),
+        el("span", { class: "now-tag", style: "left:" + x(now) + "%" }, "now")))];
+
+    for (const group of data.groups) {
+      rows.push(el("div", { class: "tl-row group" },
+        el("div", { class: "tl-label" }, logo(group.provider), el("b", {}, providerName(group.provider) + (group.plan ? " · " + group.plan : ""))),
+        el("div", { class: "tl-track", style: "min-height:34px" }, gridLines(), nowLine())));
+      const active = group.credentials.filter((c) => usable(c) && c.routing_tier !== "exhausted");
+      for (const c of group.credentials) {
+        const index = active.indexOf(c);
+        const role = !ordered(strategy) || index < 0 ? "" : index === 0 ? "now" : index === 1 ? "next" : "";
+        const badgeText = index < 0 ? "–" : ordered(strategy) ? "#" + (index + 1) : "·";
+        const track = el("div", { class: "tl-track" }, gridLines());
+        const w = weeklyWindow(c);
+        if (w) {
+          const len = w.window_minutes * 60000;
+          let reset = ts(w.reset_at);
+          let estimated = false;
+          while (reset <= now) { reset += len; estimated = true; }
+          const periodStart = reset - len;
+          const used = estimated ? 0 : Math.max(0, w.used_fraction);
+          const cls = estimated ? "estimated" : level(used);
+          const left = xu(periodStart), right = x(reset);
+          track.append(el("div", { class: "period week " + cls, style: "left:" + left + "%;width:" + (right - left) + "%",
+              title: w.label + " window " + (estimated ? "(estimated after reset)" : pct(used) + " used") + " · resets " + when(reset) },
+            el("div", { class: "elapsed", style: "width:" + Math.max(0, Math.min(100, ((now - periodStart) / len) * 100)) + "%" })));
+          track.append(el("div", { class: "reset-mark", style: "left:" + right + "%", title: "resets " + when(reset) }));
+          if (reset < end) {
+            const nextRight = xu(reset + len);
+            track.append(el("div", { class: "period week next", style: "left:" + right + "%;width:" + (nextRight - right) + "%", title: "next window: full quota from " + when(reset) }));
+          }
+          const label = (estimated ? "rolled over · " : pct(used) + " used · ") + "resets " + when(reset);
+          const labelLeft = right < 70 ? "left:calc(" + right + "% + 8px)" : "right:calc(" + (100 - right) + "% + 8px)";
+          track.append(el("span", { class: "period-text", style: labelLeft + ";top:7px" }, label));
+        } else {
+          track.append(el("span", { class: "tl-note" }, c.routing_tier === "discover" ? "Reset time is learned from the next request." : "This provider reports no quota windows."));
+        }
+        const f = fiveHourWindow(c);
+        if (f && ts(f.reset_at) > now) {
+          const len = f.window_minutes * 60000, reset = ts(f.reset_at);
+          const used = Math.max(0, f.used_fraction);
+          track.append(el("div", { class: "period five " + level(used), style: "left:" + xu(reset - len) + "%;width:" + (xu(reset) - xu(reset - len)) + "%",
+            title: f.label + " window " + pct(used) + " used · resets " + when(reset) },
+            el("div", { class: "elapsed", style: "width:" + Math.max(0, Math.min(100, ((now - (reset - len)) / len) * 100)) + "%" })));
+        }
+        track.append(nowLine());
+        rows.push(el("div", { class: "tl-row" + (usable(c) ? "" : " inactive") },
+          el("div", { class: "tl-label" },
+            el("span", { class: "order-badge " + role, title: index < 0 ? "set aside" : "draw-down position" }, badgeText),
+            el("div", { class: "who" }, el("div", { title: accountName(c) }, accountName(c)),
+              el("div", { class: "sub" }, (parkedReason(c) || [null, f ? "5h " + pct(Math.max(0, f.used_fraction)) + " used" : providerName(c.provider)])[1]))),
+          track));
+      }
+    }
+    $("timeline").replaceChildren(el("div", { class: "tl" }, rows));
+  }
+
+  /* ---------- Account detail ---------- */
+  function windowLabel(w) {
+    if (w.limit) return w.limit + " · " + w.label;
+    if (w.key === "7d_oi") return "7d (oi)";
+    return w.label;
+  }
+  function renderWindow(w) {
+    const details = [];
+    if (w.used_fraction >= 0) details.push(pct(w.used_fraction) + " used");
+    if (w.status && w.status !== "allowed") details.push(w.status.replace(/_/g, " "));
+    if (isSet(w.reset_at)) details.push(el("span", { title: when(w.reset_at) }, until(w.reset_at)));
+    if (typeof w.projected_used_at_reset === "number" && w.projected_used_at_reset < 0.95 && w.window_minutes >= 1440) {
+      details.push(el("span", { class: "waste" }, "≈" + pct(1 - w.projected_used_at_reset) + " expires unused"));
+    }
+    const detail = el("div", { class: "wd" });
+    details.forEach((d, i) => { if (i) detail.append(" · "); detail.append(d); });
+    return el("div", { class: "win" }, el("div", { class: "wl", title: windowLabel(w) + " (" + w.key + ")" }, windowLabel(w)),
+      meter(w.used_fraction, w.projected_used_at_reset), detail);
+  }
+  function badges(c, role) {
+    const out = [];
+    if (role === "now") out.push(el("span", { class: "badge accent" }, "drawing now"));
+    if (role === "next") out.push(el("span", { class: "badge accent" }, "next"));
+    const parked = parkedReason(c);
+    if (parked) out.push(el("span", { class: "badge " + parked[0], title: c.status_message || "" }, parked[1]));
+    if (c.routing_tier === "discover") out.push(el("span", { class: "badge" }, "not observed yet"));
+    if (c.priority) out.push(el("span", { class: "badge" }, "priority " + c.priority));
+    if (c.provider === "codex") out.push(el("span", { class: "badge" + (c.websockets ? " ok" : "") }, c.websockets ? "websocket" : "http/sse"));
+    if (c.auth_kind === "apikey") out.push(el("span", { class: "badge" }, "api key"));
+    return out;
+  }
+  function cacheCell(u) {
+    const read = u.cache_read_tokens || 0, write = u.cache_creation_tokens || 0;
+    if (!read && !write) return el("td", { class: "num" }, el("span", { class: "sub" }, "no cached prompts yet"));
+    return el("td", { class: "num" }, pct(read / (read + write)) + " hit", el("div", { class: "sub" }, compact(read) + " read · " + compact(write) + " written"));
+  }
+  function renderGroup(group, strategy) {
+    const active = group.credentials.filter((c) => usable(c) && c.routing_tier !== "exhausted");
+    const rows = group.credentials.map((c) => {
+      const index = active.indexOf(c);
+      const role = ordered(strategy) && index === 0 ? "now" : ordered(strategy) && index === 1 ? "next" : "";
+      const u = c.usage || {};
+      return el("tr", { class: usable(c) ? "" : "inactive" },
+        el("td", { class: "acct" },
+          el("div", { class: "name" }, isLive(c) ? el("span", { class: "live", style: "display:inline-block;margin-right:6px", title: "served a request in the last 3 minutes" }) : null, accountName(c)),
+          c.email && c.name !== c.email ? el("div", { class: "sub" }, c.name) : null,
+          el("div", { class: "badges" }, badges(c, role))),
+        el("td", { class: "windows" }, c.windows.length ? c.windows.map(renderWindow)
+          : el("div", { class: "empty" }, c.routing_tier === "discover" ? "Quota is read from the first response." : "No quota data from this provider.")),
+        el("td", { class: "num" }, compact(u.requests) + " requests",
+          el("div", { class: "sub" }, (u.failed ? compact(u.failed) + " failed · " : "") + compact(u.input_tokens) + " in · " + compact(u.output_tokens) + " out"),
+          isSet(u.last_used) ? el("div", { class: "sub" }, "last used " + duration(Date.now() - ts(u.last_used)) + " ago") : null),
+        cacheCell(u));
+    });
+    return el("section", { class: "group" },
+      el("div", { class: "group-head" }, logo(group.provider),
+        el("h3", {}, providerName(group.provider) + (group.plan ? " · " + group.plan : "")),
+        el("span", { class: "meta" }, group.credentials.filter(usable).length + " of " + group.credentials.length + " usable")),
+      el("div", { class: "table-wrap" }, el("table", {},
+        el("thead", {}, el("tr", {}, el("th", {}, "Account"), el("th", {}, "Quota windows"), el("th", {}, "Usage since start"), el("th", {}, "Prompt cache"))),
+        el("tbody", {}, rows))));
+  }
+
+  /* ---------- Summary ---------- */
+  function renderStatus(data) {
+    const all = data.groups.flatMap((g) => g.credentials);
+    const known = all.filter((c) => c.routing_tier === "known" && isSet(c.weekly_reset_at)).sort((a, b) => ts(a.weekly_reset_at) - ts(b.weekly_reset_at));
+    const a = data.affinity || {};
+    const read = a.cache_read_tokens || 0, write = a.cache_creation_tokens || 0;
+    const items = [
+      [el("b", {}, all.filter(usable).length + " of " + all.length), " accounts usable"],
+      known.length ? ["next weekly reset ", el("b", {}, duration(ts(known[0].weekly_reset_at) - Date.now())), " (" + accountName(known[0]) + ")"] : ["no weekly reset times seen yet"],
+      read + write ? ["prompt cache hit ", el("b", {}, pct(read / (read + write)))] : null,
+      ["sessions switched account ", el("b", {}, compact(a.switches || 0)), " times", a.cache_creation_after_switch_tokens ? " · " + compact(a.cache_creation_after_switch_tokens) + " tokens re-cached" : ""],
+    ];
+    $("statusLine").replaceChildren(...items.filter(Boolean).map((parts) => el("li", {}, parts)));
+  }
+
+  function render(data) {
+    const r = data.routing || {};
+    const strategy = r.strategy || "round-robin";
+    const chips = [
+      el("span", { class: "chip" }, "strategy ", el("b", {}, strategy)),
+      el("span", { class: "chip" }, "session affinity ", el("b", {}, r.session_affinity ? "on" + (r.session_affinity_ttl ? " · " + r.session_affinity_ttl : "") : "off")),
+    ];
+    if (r.home_mode) chips.push(el("span", { class: "chip" }, el("b", {}, "home mode"), " · routing decided by Home"));
+    $("chips").replaceChildren(...chips);
+    const alerts = (data.alerts || []).map((a) => el("div", { class: "notice " + (a.kind === "relogin" || a.kind === "quota_exhausted" ? "error" : "warning") }, a.message,
+      a.kind === "relogin" ? [" ", el("a", { href: "/management.html" }, "Open the management panel")] : null));
+    $("notices").replaceChildren(...alerts, ...(data.warnings || []).map((w) => el("div", { class: "notice " + (w.level || "info") }, w.message)));
+    renderStatus(data);
+    $("lanesNote").textContent = ordered(strategy)
+      ? "Requests go to the first account in each lane. When it cools down or nears its limit, the next one takes over."
+      : "With " + strategy + ", requests are spread across every active account.";
+    $("lanes").replaceChildren(...(data.groups.length ? groupsByProvider(data.groups).map(([p, creds]) => renderLane(p, creds, strategy))
+      : [el("div", { class: "notice info" }, "No accounts are loaded. Add one from ", el("a", { href: "/management.html" }, "the management panel"), ".")]));
+    renderTimeline(data, strategy);
+    $("groups").replaceChildren(...data.groups.map((g) => renderGroup(g, strategy)));
+    $("updated").textContent = "Updated " + new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  }
+
+  // Lanes are per provider: plans of one provider share a routing pool.
+  function groupsByProvider(groups) {
+    const map = new Map();
+    for (const g of groups) map.set(g.provider, (map.get(g.provider) || []).concat(g.credentials));
+    for (const creds of map.values()) creds.sort((a, b) => a.routing_order - b.routing_order);
+    return [...map.entries()];
+  }
+
+  function showConnect(message) {
+    $("loading").hidden = true;
+    $("app").hidden = true;
+    $("connect").hidden = false;
+    let note = $("connectError");
+    if (message) {
+      if (!note) { note = el("div", { class: "notice error", id: "connectError" }); $("connect").prepend(note); }
+      note.textContent = message;
+    } else if (note) note.remove();
+    $("keyInput").value = "";
+    $("keyInput").focus();
+  }
+
+  async function load() {
+    const key = localStorage.getItem(STORAGE_KEY);
+    if (!key) { showConnect(); return; }
+    $("refresh").disabled = true;
+    try {
+      const res = await fetch("/v8/management/routing/overview", { headers: { Authorization: "Bearer " + key }, cache: "no-store" });
+      if (res.status === 401 || res.status === 403) {
+        const body = await res.json().catch(() => ({}));
+        localStorage.removeItem(STORAGE_KEY);
+        showConnect("The proxy refused that key (" + (body.error || "HTTP " + res.status) + "). Check remote-management.secret-key in your config.");
+        return;
+      }
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      const data = await res.json();
+      $("connect").hidden = true;
+      $("loading").hidden = true;
+      $("app").hidden = false;
+      render(data);
+    } catch (err) {
+      $("updated").textContent = "Refresh failed (" + err.message + "). Retrying in 30s.";
+    } finally {
+      $("refresh").disabled = false;
+    }
+  }
+
+  $("connect").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const value = $("keyInput").value.trim();
+    if (value) { localStorage.setItem(STORAGE_KEY, value); load(); }
+  });
+  $("refresh").addEventListener("click", load);
+  $("forget").addEventListener("click", () => { localStorage.removeItem(STORAGE_KEY); showConnect(); });
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) load(); });
+  load();
+  setInterval(() => { if (!document.hidden) load(); }, REFRESH_MS);
+})();
+</script>
+</body>
+</html>

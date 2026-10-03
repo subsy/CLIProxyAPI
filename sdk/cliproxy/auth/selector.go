@@ -81,10 +81,11 @@ const (
 )
 
 type modelCooldownError struct {
-	model    string
-	resetIn  time.Duration
-	provider string
-	cause    error
+	model       string
+	resetIn     time.Duration
+	availableAt time.Time
+	provider    string
+	cause       error
 }
 
 // NewModelCooldownError creates an error representing model-level cooldown.
@@ -101,10 +102,11 @@ func newModelCooldownErrorWithCause(model, provider string, resetIn time.Duratio
 		resetIn = 0
 	}
 	return &modelCooldownError{
-		model:    model,
-		provider: provider,
-		resetIn:  resetIn,
-		cause:    cause,
+		model:       model,
+		provider:    provider,
+		resetIn:     resetIn,
+		availableAt: time.Now().Add(resetIn),
+		cause:       cause,
 	}
 }
 
@@ -138,6 +140,9 @@ func (e *modelCooldownError) Error() string {
 	} else {
 		displayDuration = displayDuration.Round(time.Second)
 	}
+	if displayDuration > 0 && !e.availableAt.IsZero() {
+		message = fmt.Sprintf("%s; the next one is available in %s (at %s)", message, displayDuration, nextAvailableClock(e.availableAt, time.Now()))
+	}
 	errorBody := map[string]any{
 		"code":          "model_cooldown",
 		"message":       message,
@@ -147,6 +152,9 @@ func (e *modelCooldownError) Error() string {
 	}
 	if e.provider != "" {
 		errorBody["provider"] = e.provider
+	}
+	if !e.availableAt.IsZero() {
+		errorBody["available_at"] = e.availableAt.UTC().Format(time.RFC3339)
 	}
 	if e.cause != nil {
 		if causeText := ExtractUpstreamErrorSummary(e.cause.Error()); causeText != "" {
@@ -361,6 +369,34 @@ func (e *modelCooldownError) Headers() http.Header {
 	return headers
 }
 
+// Routing strategy names accepted in routing.strategy.
+const (
+	RoutingStrategyRoundRobin         = "round-robin"
+	RoutingStrategyWeightedRoundRobin = "weighted-round-robin"
+	RoutingStrategyFillFirst          = "fill-first"
+	RoutingStrategyResetSoonest       = "reset-soonest"
+)
+
+// NormalizeRoutingStrategy maps a configured strategy name or alias to its canonical name.
+// An empty value means the default round-robin; unknown values report false.
+func NormalizeRoutingStrategy(strategy string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(strategy)) {
+	case "", RoutingStrategyRoundRobin, "roundrobin", "rr":
+		return RoutingStrategyRoundRobin, true
+	case RoutingStrategyWeightedRoundRobin, "weightedroundrobin", "wrr":
+		return RoutingStrategyWeightedRoundRobin, true
+	case RoutingStrategyFillFirst, "fillfirst", "ff":
+		return RoutingStrategyFillFirst, true
+	case RoutingStrategyResetSoonest, "resetsoonest", "rs":
+		return RoutingStrategyResetSoonest, true
+	default:
+		return "", false
+	}
+}
+
+// AuthPriority returns the routing priority tier of a credential; higher tiers are tried first.
+func AuthPriority(auth *Auth) int { return authPriority(auth) }
+
 func authPriority(auth *Auth) int {
 	if auth == nil || auth.Attributes == nil {
 		return 0
@@ -411,6 +447,14 @@ func canonicalModelKey(model string) string {
 }
 
 func authWebsocketsEnabled(auth *Auth) bool {
+	return WebsocketsEnabled(auth)
+}
+
+// WebsocketsEnabled reports whether a credential uses the upstream websocket transport.
+// An explicit "websockets" attribute or metadata value always wins. Without one, Codex
+// OAuth (subscription) credentials default to websockets because they lower per-turn
+// latency; every other credential defaults to HTTP.
+func WebsocketsEnabled(auth *Auth) bool {
 	if auth == nil {
 		return false
 	}
@@ -422,24 +466,19 @@ func authWebsocketsEnabled(auth *Auth) bool {
 			}
 		}
 	}
-	if len(auth.Metadata) == 0 {
-		return false
-	}
-	raw, ok := auth.Metadata["websockets"]
-	if !ok || raw == nil {
-		return false
-	}
-	switch v := raw.(type) {
-	case bool:
-		return v
-	case string:
-		parsed, errParse := strconv.ParseBool(strings.TrimSpace(v))
-		if errParse == nil {
-			return parsed
+	if raw, ok := auth.Metadata["websockets"]; ok && raw != nil {
+		switch v := raw.(type) {
+		case bool:
+			return v
+		case string:
+			parsed, errParse := strconv.ParseBool(strings.TrimSpace(v))
+			if errParse == nil {
+				return parsed
+			}
+		default:
 		}
-	default:
 	}
-	return false
+	return strings.EqualFold(strings.TrimSpace(auth.Provider), "codex") && auth.AuthKind() == AuthKindOAuth
 }
 
 func preferCodexWebsocketAuths(ctx context.Context, provider string, available []*Auth) []*Auth {

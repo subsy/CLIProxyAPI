@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/dashboard"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/watcher/synthesizer"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/config"
@@ -41,11 +42,8 @@ func normalizedRoutingRuntimeState(cfg *config.Config) routingRuntimeState {
 		return state
 	}
 
-	switch strings.ToLower(strings.TrimSpace(cfg.Routing.Strategy)) {
-	case "weighted-round-robin", "weightedroundrobin", "wrr":
-		state.strategy = "weighted-round-robin"
-	case "fill-first", "fillfirst", "ff":
-		state.strategy = "fill-first"
+	if strategy, ok := coreauth.NormalizeRoutingStrategy(cfg.Routing.Strategy); ok {
+		state.strategy = strategy
 	}
 	state.sessionAffinity = cfg.Routing.SessionAffinity
 	if ttl := strings.TrimSpace(cfg.Routing.SessionAffinityTTL); ttl != "" {
@@ -65,13 +63,16 @@ func normalizedRoutingRuntimeState(cfg *config.Config) routingRuntimeState {
 func newRoutingSelector(state routingRuntimeState) coreauth.Selector {
 	var selector coreauth.Selector
 	switch state.strategy {
-	case "weighted-round-robin":
+	case coreauth.RoutingStrategyWeightedRoundRobin:
 		selector = &coreauth.WeightedRoundRobinSelector{}
-	case "fill-first":
+	case coreauth.RoutingStrategyFillFirst:
 		selector = &coreauth.FillFirstSelector{}
+	case coreauth.RoutingStrategyResetSoonest:
+		selector = &coreauth.ResetSoonestSelector{}
 	default:
 		selector = &coreauth.RoundRobinSelector{}
 	}
+	dashboard.SetSessionAffinityEnabled(state.sessionAffinity)
 	if state.sessionAffinity {
 		subagents := state.sessionAffinitySubagents
 		selector = coreauth.NewSessionAffinitySelectorWithConfig(coreauth.SessionAffinityConfig{
@@ -213,6 +214,7 @@ func (s *Service) applyManagerConfig(ctx context.Context, commit configCommit) b
 	if errContext := ctx.Err(); errContext != nil {
 		return false
 	}
+	dashboard.DefaultAlerter().Configure(commit.cfg.Routing.Alerts)
 	routingState := normalizedRoutingRuntimeState(commit.cfg)
 	if s.appliedRoutingState == nil || *s.appliedRoutingState != routingState {
 		s.coreManager.SetSelector(newRoutingSelector(routingState))

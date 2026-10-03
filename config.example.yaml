@@ -126,7 +126,11 @@ access:
 
 # Routing strategy for selecting credentials when multiple match.
 routing:
-  strategy: "round-robin" # round-robin (default), weighted-round-robin, fill-first
+  strategy: "round-robin" # round-robin (default), weighted-round-robin, fill-first, reset-soonest
+  # reset-soonest spends subscription quota before it expires: it prefers the Claude/Codex OAuth
+  # credential whose weekly window resets soonest (from observed quota headers), skips credentials
+  # whose 5-hour window is nearly used up, and sends one request to each not-yet-observed
+  # credential after start-up to learn its reset time. Credentials without quota data come last.
   # weighted-round-robin uses each credential's integer weight (default 1, maximum 1,000,000).
   # Non-positive weights exclude the credential while this strategy is active.
   # For OAuth/file credentials, add a top-level numeric "weight" field to the auth JSON.
@@ -148,6 +152,16 @@ routing:
   # for maximum parallel concurrency.
   # Ignored when routing.session-affinity is false.
   session-affinity-subagents: true
+
+  # Operator alerts. Alerts are always logged and shown on /dashboard.html; set webhook-url to
+  # also receive each new alert once as a POST (JSON by default).
+  # alerts:
+  #   webhook-url: "https://hooks.slack.com/services/T000/B000/XXXX" # or e.g. https://ntfy.sh/my-private-topic
+  #   webhook-format: "slack" # json, text (ntfy-style) or slack; inferred as slack for hooks.slack.com URLs
+  #   quota-waste-threshold: 0.25 # alert when >= 25% of a weekly window is on track to expire unused (negative disables)
+  #   quota-waste-window: "24h" # ...and that window resets within this time
+  # A subscription window that is used up, and logins that stop refreshing (unauthorized /
+  # invalid grant / expired), always raise an alert.
 
   # When true, unprefixed model requests only use credentials without a prefix (except when prefix == model name).
   force-model-prefix: false
@@ -606,7 +620,8 @@ upstream:
 #           weight: 5 # optional: weighted-round-robin share; omitted defaults to 1; maximum 1,000,000
 #           disable-codex-cloaking: false # optional: true disables cloaking; OAuth provider settings do not apply here
 #           alpha-search: false # optional: allow this key to serve /v1/alpha/search via base-url + /alpha/search
-#           websockets: false # optional: use the Codex upstream WebSocket transport
+#           websockets: false # optional: use the Codex upstream WebSocket transport (API keys default to false;
+#                             # Codex OAuth auth files default to true unless they set "websockets": false)
 #
 #   # Claude API keys
 #

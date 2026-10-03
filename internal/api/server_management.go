@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/dashboard"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/managementasset"
 	log "github.com/sirupsen/logrus"
 )
@@ -305,6 +306,17 @@ func (s *Server) pluginResourceNoRoute(c *gin.Context) {
 		return
 	}
 	c.AbortWithStatus(http.StatusNotFound)
+}
+
+// serveRoutingDashboard serves the embedded routing dashboard under the same rules as the
+// control panel: it is hidden in Home mode or when the control panel is disabled.
+func (s *Server) serveRoutingDashboard(c *gin.Context) {
+	cfg := s.cfg
+	if cfg == nil || cfg.Home.Enabled || cfg.RemoteManagement.DisableControlPanel {
+		c.AbortWithStatus(http.StatusNotFound)
+		return
+	}
+	dashboard.ServePage(c)
 }
 
 func (s *Server) serveManagementControlPanel(c *gin.Context) {

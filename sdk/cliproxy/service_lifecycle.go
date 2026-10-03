@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/api"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/dashboard"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/home"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/redisqueue"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/registry"
@@ -91,6 +92,8 @@ func (s *Service) Run(ctx context.Context) error {
 		interval := 15 * time.Minute
 		s.coreManager.StartAutoRefresh(ctx, interval)
 		log.Infof("core auth auto-refresh started (interval=%s)", interval)
+		dashboard.DefaultAlerter().Configure(s.cfg.Routing.Alerts)
+		dashboard.DefaultAlerter().Start(ctx, s.coreManager.List)
 	}
 
 	if !homeEnabled {
