@@ -21,6 +21,7 @@ import (
 	configaccess "github.com/router-for-me/CLIProxyAPI/v8/internal/access/config_access"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/api"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/buildinfo"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/clientconfig"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/cmd"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/home"
@@ -217,7 +218,11 @@ func main() {
 			fmt.Fprintf(os.Stderr, "failed to load config %s: %v\n", clientConfigPath, errLoad)
 			os.Exit(1)
 		}
-		os.Exit(cmd.DoClientConfig(os.Stdout, cfgClient, clientConfig, clientConfigHost))
+		if errRender := clientconfig.Render(os.Stdout, cfgClient, clientConfig, clientConfigHost); errRender != nil {
+			fmt.Fprintln(os.Stderr, errRender)
+			os.Exit(2)
+		}
+		os.Exit(0)
 	}
 
 	if discoverGateways || discoverJSON {
