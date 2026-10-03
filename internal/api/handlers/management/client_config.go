@@ -20,7 +20,11 @@ func (h *Handler) GetClientConfig(c *gin.Context) {
 		host = requestHostName(c.Request.Host)
 	}
 	var out bytes.Buffer
-	if errRender := clientconfig.Render(&out, h.cfg, c.Param("client"), host); errRender != nil {
+	// Render under h.mu so a concurrent config update cannot mix two configs' port and key.
+	h.mu.Lock()
+	errRender := clientconfig.Render(&out, h.cfg, c.Param("client"), host)
+	h.mu.Unlock()
+	if errRender != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": errRender.Error()})
 		return
 	}
