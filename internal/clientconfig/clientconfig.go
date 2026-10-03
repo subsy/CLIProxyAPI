@@ -1,6 +1,8 @@
-package cmd
+// Package clientconfig renders the settings that point Claude Code or Codex at this proxy.
+package clientconfig
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -12,12 +14,13 @@ import (
 
 const clientConfigKeyPlaceholder = "<one of your api-keys>"
 
-// DoClientConfig prints the settings that point a coding agent at this proxy.
-// It returns a process exit code.
-func DoClientConfig(out io.Writer, cfg *config.Config, client, host string) int {
+// ErrInvalid marks a client or host that cannot be rendered.
+var ErrInvalid = errors.New("invalid client config request")
+
+// Render writes the settings for client ("claude" or "codex") reaching the proxy at host.
+func Render(out io.Writer, cfg *config.Config, client, host string) error {
 	if !validClientHost(host) {
-		_, _ = fmt.Fprintf(out, "invalid client host %q: use a host name, IPv4 address or [IPv6] address\n", host)
-		return 2
+		return fmt.Errorf("%w: client host %q must be a host name, IPv4 address or [IPv6] address", ErrInvalid, host)
 	}
 	baseURL, apiKey, notes := clientConfigEndpoint(cfg, host)
 	switch strings.ToLower(strings.TrimSpace(client)) {
@@ -26,13 +29,12 @@ func DoClientConfig(out io.Writer, cfg *config.Config, client, host string) int 
 	case "codex":
 		writeCodexClientConfig(out, baseURL, apiKey)
 	default:
-		_, _ = fmt.Fprintf(out, "unknown client %q: use claude or codex\n", client)
-		return 2
+		return fmt.Errorf("%w: unknown client %q, use claude or codex", ErrInvalid, client)
 	}
 	for _, note := range notes {
 		_, _ = fmt.Fprintln(out, "# Note: "+note)
 	}
-	return 0
+	return nil
 }
 
 // validClientHost keeps the host safe to paste into TOML and shell output.
@@ -72,8 +74,8 @@ func clientConfigEndpoint(cfg *config.Config, host string) (string, string, []st
 	if host == "" {
 		host = "localhost"
 	}
-	if host == "localhost" || host == "127.0.0.1" {
-		notes = append(notes, "for another machine (for example over Tailscale), rerun with -client-host <this machine's address>")
+	if host == "localhost" || host == "127.0.0.1" || host == "::1" {
+		notes = append(notes, "for another machine (for example over Tailscale), use this machine's address as the host (-client-host on the command line, ?host= over HTTP)")
 	}
 	host = strings.TrimSuffix(strings.TrimPrefix(host, "["), "]")
 	return fmt.Sprintf("%s://%s", scheme, net.JoinHostPort(host, strconv.Itoa(port))), apiKey, notes
