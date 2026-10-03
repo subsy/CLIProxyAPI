@@ -351,7 +351,8 @@ type QuotaExceeded struct {
 // RoutingConfig configures how credentials are selected for requests.
 type RoutingConfig struct {
 	// Strategy selects the credential selection strategy.
-	// Supported values: "round-robin" (default), "weighted-round-robin", "fill-first".
+	// Supported values: "round-robin" (default), "weighted-round-robin", "fill-first", "reset-soonest".
+	// reset-soonest drains the subscription whose weekly quota resets soonest first.
 	Strategy string `yaml:"strategy,omitempty" json:"strategy,omitempty"`
 
 	// SessionAffinity enables universal session-sticky routing for all clients.
@@ -371,6 +372,25 @@ type RoutingConfig struct {
 	// When false, subagents are distributed across the credential pool via the fallback selector.
 	// Default: true. Ignored when SessionAffinity is false.
 	SessionAffinitySubagents *bool `yaml:"session-affinity-subagents,omitempty" json:"session-affinity-subagents,omitempty"`
+
+	// Alerts configures notifications about subscription quota and credential logins.
+	Alerts RoutingAlertsConfig `yaml:"alerts,omitempty" json:"alerts,omitempty"`
+}
+
+// RoutingAlertsConfig configures operator alerts. Alerts are always logged and shown on the
+// routing dashboard; a webhook additionally pushes each alert once when it first appears.
+type RoutingAlertsConfig struct {
+	// WebhookURL receives a POST for each new alert. Empty disables delivery.
+	WebhookURL string `yaml:"webhook-url,omitempty" json:"webhook-url,omitempty"`
+	// WebhookFormat is "json", "text" or "slack". "text" posts the message as plain text with a
+	// Title header (ntfy-style push services); "slack" posts a Slack incoming-webhook message.
+	// When empty, Slack webhook URLs use "slack" and everything else uses "json".
+	WebhookFormat string `yaml:"webhook-format,omitempty" json:"webhook-format,omitempty"`
+	// QuotaWasteThreshold alerts when at least this share of a weekly window is projected to
+	// expire unused. Default 0.25; a negative value disables quota alerts.
+	QuotaWasteThreshold float64 `yaml:"quota-waste-threshold,omitempty" json:"quota-waste-threshold,omitempty"`
+	// QuotaWasteWindow only considers windows that reset within this duration. Default 24h.
+	QuotaWasteWindow string `yaml:"quota-waste-window,omitempty" json:"quota-waste-window,omitempty"`
 }
 
 // OAuthModelAlias defines a model ID alias for a specific channel.

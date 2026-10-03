@@ -99,7 +99,14 @@ func main() {
 	// For legacy --discover-json flag or JSON requests, keep stdout clean
 	isJSONDiscover := argvEnablesBoolFlag(os.Args[1:], "discover-json")
 	isDiscoverMode := isJSONDiscover || argvEnablesBoolFlag(os.Args[1:], "discover")
-	if !isJSONDiscover {
+	// -client-config output is meant to be pasted or redirected into client config files.
+	isClientConfig := false
+	for _, arg := range os.Args[1:] {
+		if name := strings.TrimLeft(arg, "-"); arg != name && (name == "client-config" || strings.HasPrefix(name, "client-config=")) {
+			isClientConfig = true
+		}
+	}
+	if !isJSONDiscover && !isClientConfig {
 		fmt.Printf("CLIProxyAPI Version: %s, Commit: %s, BuiltAt: %s\n", buildinfo.Version, buildinfo.Commit, buildinfo.BuildDate)
 	}
 
@@ -116,6 +123,8 @@ func main() {
 	var devinLogin bool
 	var metaLogin bool
 	var discoverGateways bool
+	var clientConfig string
+	var clientConfigHost string
 	var discoverTimeout int
 	var discoverJSON bool
 	var discoverServiceType string
@@ -145,6 +154,8 @@ func main() {
 	flag.BoolVar(&devinLogin, "devin-login", false, "Login to Devin using OAuth")
 	flag.BoolVar(&metaLogin, "meta-login", false, "Login to Meta using OAuth")
 	flag.BoolVar(&discoverGateways, "discover", false, "Discover local AI gateways and CPA instances on the LAN")
+	flag.StringVar(&clientConfig, "client-config", "", "Print the settings that point a client at this proxy (claude or codex), then exit")
+	flag.StringVar(&clientConfigHost, "client-host", "localhost", "Host name or address clients use to reach this proxy (with -client-config)")
 	flag.IntVar(&discoverTimeout, "discover-timeout", 3, "Timeout in seconds for LAN discovery (default 3s)")
 	flag.BoolVar(&discoverJSON, "discover-json", false, "Output discovered gateways in JSON format")
 	flag.StringVar(&discoverServiceType, "discover-service-type", "", "DNS-SD service type for LAN discovery (default _ai-gateway._tcp)")
@@ -198,6 +209,15 @@ func main() {
 
 	// Parse the command-line flags.
 	flag.Parse()
+
+	if clientConfig != "" {
+		cfgClient, errLoad := config.LoadConfig(configPath)
+		if errLoad != nil {
+			fmt.Fprintf(os.Stderr, "failed to load config %s: %v\n", configPath, errLoad)
+			os.Exit(1)
+		}
+		os.Exit(cmd.DoClientConfig(os.Stdout, cfgClient, clientConfig, clientConfigHost))
+	}
 
 	if discoverGateways || discoverJSON {
 		cfgInclude, cfgExclude := cmd.LoadDiscoveryScanFilters(configPath)

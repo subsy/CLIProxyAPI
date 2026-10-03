@@ -216,6 +216,11 @@ func newAuthUnavailableError(next, now time.Time) error {
 func newAuthUnavailableErrorWithCause(next, now time.Time, cause error) error {
 	err := &Error{Code: "auth_unavailable", Message: "no auth available"}
 	if next.After(now) {
+		wait := next.Sub(now).Round(time.Second)
+		if wait < time.Second {
+			wait = time.Second
+		}
+		err.Message = fmt.Sprintf("no credential is available right now; the next one is back in %s (at %s)", wait, nextAvailableClock(next, now))
 		err.HTTPStatus = http.StatusServiceUnavailable
 		err.Retryable = true
 		return &authUnavailableError{
@@ -339,4 +344,14 @@ func WithCause(err *Error, cause error) error {
 		base:  err,
 		cause: cause,
 	}
+}
+
+// nextAvailableClock formats a recovery time for error messages: the UTC time of day, with
+// the date added when it is not today.
+func nextAvailableClock(at, now time.Time) string {
+	at, now = at.UTC(), now.UTC()
+	if at.YearDay() != now.YearDay() || at.Year() != now.Year() {
+		return at.Format("Mon 15:04 UTC")
+	}
+	return at.Format("15:04 UTC")
 }
