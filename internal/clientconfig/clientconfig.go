@@ -22,14 +22,20 @@ func Render(out io.Writer, cfg *config.Config, client, host string) error {
 	if !validClientHost(host) {
 		return fmt.Errorf("%w: client host %q must be a host name, IPv4 address or [IPv6] address", ErrInvalid, host)
 	}
-	baseURL, apiKey, notes := clientConfigEndpoint(cfg, host)
+	var provider string
 	switch strings.ToLower(strings.TrimSpace(client)) {
 	case "claude", "claude-code":
-		writeClaudeClientConfig(out, baseURL, apiKey)
+		provider = "claude"
 	case "codex":
-		writeCodexClientConfig(out, baseURL, apiKey)
+		provider = "codex"
 	default:
 		return fmt.Errorf("%w: unknown client %q, use claude or codex", ErrInvalid, client)
+	}
+	baseURL, apiKey, notes := clientConfigEndpoint(cfg, host, provider)
+	if provider == "claude" {
+		writeClaudeClientConfig(out, baseURL, apiKey)
+	} else {
+		writeCodexClientConfig(out, baseURL, apiKey)
 	}
 	for _, note := range notes {
 		_, _ = fmt.Fprintln(out, "# Note: "+note)
@@ -50,7 +56,7 @@ func validClientHost(host string) bool {
 	return true
 }
 
-func clientConfigEndpoint(cfg *config.Config, host string) (string, string, []string) {
+func clientConfigEndpoint(cfg *config.Config, host, provider string) (string, string, []string) {
 	var notes []string
 	scheme, port := "http", 8317
 	apiKey := clientConfigKeyPlaceholder
@@ -61,14 +67,9 @@ func clientConfigEndpoint(cfg *config.Config, host string) (string, string, []st
 		if cfg.Port > 0 {
 			port = cfg.Port
 		}
-		if len(cfg.APIKeys) > 0 {
-			apiKey = cfg.APIKeys[0]
-			if len(cfg.APIKeys) > 1 {
-				notes = append(notes, fmt.Sprintf("using the first of %d api-keys; any of them works", len(cfg.APIKeys)))
-			}
-		} else {
-			notes = append(notes, "no api-keys are configured; add one to the proxy config and use it here")
-		}
+		var keyNotes []string
+		apiKey, keyNotes = clientConfigKey(cfg, provider)
+		notes = append(notes, keyNotes...)
 	}
 	host = strings.TrimSpace(host)
 	if host == "" {
@@ -79,6 +80,38 @@ func clientConfigEndpoint(cfg *config.Config, host string) (string, string, []st
 	}
 	host = strings.TrimSuffix(strings.TrimPrefix(host, "["), "]")
 	return fmt.Sprintf("%s://%s", scheme, net.JoinHostPort(host, strconv.Itoa(port))), apiKey, notes
+}
+
+// clientConfigKey picks the api-key a client should use for provider. With api-key-policies,
+// it prefers a key restricted to a set that includes provider (a key made for that client),
+// then an unrestricted key; a key whose policy excludes provider is never chosen.
+func clientConfigKey(cfg *config.Config, provider string) (string, []string) {
+	if len(cfg.APIKeys) == 0 {
+		return clientConfigKeyPlaceholder, []string{"no api-keys are configured; add one to the proxy config and use it here"}
+	}
+	if len(cfg.APIKeyPolicies) == 0 {
+		if len(cfg.APIKeys) > 1 {
+			return cfg.APIKeys[0], []string{fmt.Sprintf("using the first of %d api-keys; any of them works", len(cfg.APIKeys))}
+		}
+		return cfg.APIKeys[0], nil
+	}
+	unrestricted := ""
+	for _, key := range cfg.APIKeys {
+		allowed, restricted := cfg.AllowedProvidersForAPIKey(key)
+		if !restricted {
+			if unrestricted == "" {
+				unrestricted = key
+			}
+			continue
+		}
+		if _, ok := allowed[provider]; ok {
+			return key, nil
+		}
+	}
+	if unrestricted != "" {
+		return unrestricted, nil
+	}
+	return clientConfigKeyPlaceholder, []string{fmt.Sprintf("no api-key may use the %s provider; add one, or add %s to a key's allowed-providers", provider, provider)}
 }
 
 func writeClaudeClientConfig(out io.Writer, baseURL, apiKey string) {
