@@ -39,3 +39,15 @@ func TestCreatePrivateFile(t *testing.T) {
 		}
 	}
 }
+
+// A failed chmod must leave an existing file's contents in place.
+func TestCreatePrivateFileKeepsContentsWhenChmodFails(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root can chmod any file")
+	}
+	// /dev/null is writable but not owned by us, so chmod fails; it has no contents to lose,
+	// so this checks only that the error comes back before anything is truncated.
+	if _, err := CreatePrivateFile("/dev/null"); err == nil {
+		t.Fatal("want a chmod error for a file we do not own")
+	}
+}
