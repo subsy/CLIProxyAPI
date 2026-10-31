@@ -136,6 +136,11 @@ func (s *FileTokenStore) Save(ctx context.Context, auth *cliproxyauth.Auth) (str
 			if errOpen != nil {
 				return "", fmt.Errorf("auth filestore: open existing failed: %w", errOpen)
 			}
+			// OpenFile keeps an existing file's mode; credentials must be private.
+			if errChmod := file.Chmod(0o600); errChmod != nil {
+				_ = file.Close()
+				return "", fmt.Errorf("auth filestore: chmod existing failed: %w", errChmod)
+			}
 			if _, errWrite := file.Write(raw); errWrite != nil {
 				_ = file.Close()
 				return "", fmt.Errorf("auth filestore: write existing failed: %w", errWrite)
