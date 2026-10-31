@@ -2,6 +2,9 @@ package config
 
 import "strings"
 
+// openAICompatibleProviderPrefix matches util.OpenAICompatibleProviderKey.
+const openAICompatibleProviderPrefix = "openai-compatible-"
+
 // APIKeyPolicy limits which upstream providers one client API key may reach.
 // A key in api-keys with no policy is unrestricted.
 type APIKeyPolicy struct {
@@ -9,7 +12,8 @@ type APIKeyPolicy struct {
 	APIKey string `yaml:"api-key" json:"api-key"`
 
 	// AllowedProviders lists the provider identifiers the key may use, such as "codex",
-	// "claude", "gemini" or an openai-compatibility name. An empty list allows nothing.
+	// "claude", "gemini", or an openai-compatibility upstream's name (or its registry key
+	// "openai-compatible-<name>"). An empty list allows nothing.
 	AllowedProviders []string `yaml:"allowed-providers" json:"allowed-providers"`
 }
 
@@ -30,8 +34,14 @@ func (cfg *SDKConfig) AllowedProvidersForAPIKey(apiKey string) (allowed map[stri
 		}
 		restricted = true
 		for _, provider := range policy.AllowedProviders {
-			if provider = NormalizeProviderID(provider); provider != "" {
-				allowed[provider] = struct{}{}
+			if provider = NormalizeProviderID(provider); provider == "" {
+				continue
+			}
+			allowed[provider] = struct{}{}
+			// The registry keys an openai-compatibility upstream named "kimi" as
+			// "openai-compatible-kimi"; accept the configured name too.
+			if provider != "openai-compatibility" && !strings.HasPrefix(provider, openAICompatibleProviderPrefix) {
+				allowed[openAICompatibleProviderPrefix+provider] = struct{}{}
 			}
 		}
 	}

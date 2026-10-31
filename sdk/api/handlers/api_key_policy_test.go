@@ -10,6 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	internalconfig "github.com/router-for-me/CLIProxyAPI/v8/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/registry"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 	sdkconfig "github.com/router-for-me/CLIProxyAPI/v8/sdk/config"
@@ -127,5 +128,16 @@ func TestModelAllowedForClientKey(t *testing.T) {
 		if got := ModelAllowedForClientKey(cfg, c, model); got != want {
 			t.Errorf("%s: got %v, want %v", model, got, want)
 		}
+	}
+}
+
+func TestRestrictedKeysAreRefusedInHomeMode(t *testing.T) {
+	h := policyTestHandler()
+	h.AuthManager.SetConfig(&internalconfig.Config{Home: internalconfig.HomeConfig{Enabled: true}})
+	if _, errMsg := h.restrictProvidersForClientKey(policyTestContext(t, "codex-key"), []string{"codex"}, "m"); errMsg == nil || errMsg.StatusCode != http.StatusForbidden {
+		t.Fatalf("restricted key in Home mode: want 403, got %+v", errMsg)
+	}
+	if got, errMsg := h.restrictProvidersForClientKey(policyTestContext(t, "open-key"), []string{"home"}, "m"); errMsg != nil || len(got) != 1 {
+		t.Fatalf("unrestricted key in Home mode must pass: %v, %+v", got, errMsg)
 	}
 }

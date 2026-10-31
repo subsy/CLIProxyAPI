@@ -47,3 +47,18 @@ func TestAPIKeyPoliciesParseInBothFormats(t *testing.T) {
 		}
 	}
 }
+
+func TestOpenAICompatibilityNamesMatchRegistryKeys(t *testing.T) {
+	cfg := &SDKConfig{APIKeyPolicies: []APIKeyPolicy{
+		{APIKey: "by-name", AllowedProviders: []string{"Kimi"}},
+		{APIKey: "by-key", AllowedProviders: []string{"openai-compatible-kimi"}},
+	}}
+	for _, key := range []string{"by-name", "by-key"} {
+		if !cfg.APIKeyAllowsProvider(key, "openai-compatible-kimi") {
+			t.Errorf("%s: should allow the registry key openai-compatible-kimi", key)
+		}
+	}
+	if cfg.APIKeyAllowsProvider("by-key", "openai-compatible-openai-compatible-kimi") {
+		t.Error("an already-prefixed name must not be prefixed again")
+	}
+}

@@ -61,6 +61,11 @@ func (h *BaseAPIHandler) restrictProvidersForClientKey(ctx context.Context, prov
 	if !restricted {
 		return providers, nil
 	}
+	// Home mode picks credentials centrally without the provider list, so a policy could not
+	// be enforced there: refuse restricted keys instead.
+	if h.AuthManager != nil && h.AuthManager.HomeEnabled() {
+		return nil, clientKeyForbidden("api-key-policies are not supported in Home mode, so this API key is refused")
+	}
 	out := make([]string, 0, len(providers))
 	for _, provider := range providers {
 		if _, ok := allowed[internalconfig.NormalizeProviderID(provider)]; ok {
