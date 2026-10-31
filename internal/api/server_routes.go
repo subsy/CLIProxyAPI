@@ -79,27 +79,30 @@ func (s *Server) setupRoutes() {
 		v1.GET("/responses", openaiResponsesHandlers.ResponsesWebsocket)
 		v1.POST("/responses", openaiResponsesHandlers.Responses)
 		v1.POST("/responses/compact", openaiResponsesHandlers.Compact)
-		v1.POST("/alpha/search", s.codexAlphaSearch)
-		v1.POST("/live", s.codexLiveHandler.Handle)
-		v1.GET("/live/:call_id", s.codexLiveHandler.HandleSideband)
+		// These pick a codex credential directly instead of through model resolution.
+		requireCodex := s.requireClientKeyProvider("codex")
+		v1.POST("/alpha/search", requireCodex, s.codexAlphaSearch)
+		v1.POST("/live", requireCodex, s.codexLiveHandler.Handle)
+		v1.GET("/live/:call_id", requireCodex, s.codexLiveHandler.HandleSideband)
 	}
 
 	realtimeAuth := realtimeAuthMiddleware(s.accessManager, s.codexLiveHandler)
 	standardAuth := realtimeStandardAuthMiddleware(s.accessManager)
-	s.engine.GET("/v1/realtime", realtimeAuth, s.codexLiveHandler.HandleRealtimeWebsocket)
-	s.engine.POST("/v1/realtime", realtimeAuth, s.codexLiveHandler.Handle)
-	s.engine.POST("/v1/realtime/calls", realtimeAuth, s.codexLiveHandler.Handle)
-	s.engine.GET("/v1/realtime/calls/:call_id", realtimeAuth, s.codexLiveHandler.HandleSideband)
-	s.engine.POST("/v1/realtime/client_secrets", standardAuth, s.codexLiveHandler.CreateClientSecret)
-	s.engine.POST("/v1/realtime/sessions", standardAuth, s.codexLiveHandler.CreateLegacySession)
-	s.engine.POST("/v1/realtime/transcription_sessions", standardAuth, s.codexLiveHandler.HandleTranscriptionSession)
-	s.engine.GET("/v1/realtime/translations", realtimeAuth, s.codexLiveHandler.HandleTranslation)
-	s.engine.POST("/v1/realtime/translations", realtimeAuth, s.codexLiveHandler.HandleTranslation)
-	s.engine.POST("/v1/realtime/translations/client_secrets", standardAuth, s.codexLiveHandler.HandleTranslation)
-	s.engine.POST("/v1/realtime/calls/:call_id/hangup", standardAuth, s.codexLiveHandler.HandleHangup)
-	s.engine.POST("/v1/realtime/calls/:call_id/accept", standardAuth, s.codexLiveHandler.HandleSIPControl)
-	s.engine.POST("/v1/realtime/calls/:call_id/reject", standardAuth, s.codexLiveHandler.HandleSIPControl)
-	s.engine.POST("/v1/realtime/calls/:call_id/refer", standardAuth, s.codexLiveHandler.HandleSIPControl)
+	requireCodex := s.requireClientKeyProvider("codex")
+	s.engine.GET("/v1/realtime", realtimeAuth, requireCodex, s.codexLiveHandler.HandleRealtimeWebsocket)
+	s.engine.POST("/v1/realtime", realtimeAuth, requireCodex, s.codexLiveHandler.Handle)
+	s.engine.POST("/v1/realtime/calls", realtimeAuth, requireCodex, s.codexLiveHandler.Handle)
+	s.engine.GET("/v1/realtime/calls/:call_id", realtimeAuth, requireCodex, s.codexLiveHandler.HandleSideband)
+	s.engine.POST("/v1/realtime/client_secrets", standardAuth, requireCodex, s.codexLiveHandler.CreateClientSecret)
+	s.engine.POST("/v1/realtime/sessions", standardAuth, requireCodex, s.codexLiveHandler.CreateLegacySession)
+	s.engine.POST("/v1/realtime/transcription_sessions", standardAuth, requireCodex, s.codexLiveHandler.HandleTranscriptionSession)
+	s.engine.GET("/v1/realtime/translations", realtimeAuth, requireCodex, s.codexLiveHandler.HandleTranslation)
+	s.engine.POST("/v1/realtime/translations", realtimeAuth, requireCodex, s.codexLiveHandler.HandleTranslation)
+	s.engine.POST("/v1/realtime/translations/client_secrets", standardAuth, requireCodex, s.codexLiveHandler.HandleTranslation)
+	s.engine.POST("/v1/realtime/calls/:call_id/hangup", standardAuth, requireCodex, s.codexLiveHandler.HandleHangup)
+	s.engine.POST("/v1/realtime/calls/:call_id/accept", standardAuth, requireCodex, s.codexLiveHandler.HandleSIPControl)
+	s.engine.POST("/v1/realtime/calls/:call_id/reject", standardAuth, requireCodex, s.codexLiveHandler.HandleSIPControl)
+	s.engine.POST("/v1/realtime/calls/:call_id/refer", standardAuth, requireCodex, s.codexLiveHandler.HandleSIPControl)
 
 	openaiV1 := s.engine.Group("/openai/v1")
 	openaiV1.Use(AuthMiddleware(s.accessManager))
@@ -116,7 +119,7 @@ func (s *Server) setupRoutes() {
 		codexDirect.GET("/responses", openaiResponsesHandlers.ResponsesWebsocket)
 		codexDirect.POST("/responses", openaiResponsesHandlers.Responses)
 		codexDirect.POST("/responses/compact", openaiResponsesHandlers.Compact)
-		codexDirect.POST("/alpha/search", s.codexAlphaSearch)
+		codexDirect.POST("/alpha/search", s.requireClientKeyProvider("codex"), s.codexAlphaSearch)
 	}
 
 	// Gemini compatible API routes
@@ -1224,4 +1227,19 @@ func homeModelInt64Value(model map[string]any, keys ...string) int64 {
 		}
 	}
 	return 0
+}
+
+// requireClientKeyProvider refuses requests whose client API key may not use provider. It
+// guards routes that pick a credential for that provider directly.
+func (s *Server) requireClientKeyProvider(provider string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if s != nil && s.cfg != nil && !s.cfg.APIKeyAllowsProvider(handlers.ClientAPIKey(c), provider) {
+			c.AbortWithStatusJSON(http.StatusForbidden, handlers.ErrorResponse{Error: handlers.ErrorDetail{
+				Message: "this endpoint is not available to this API key",
+				Type:    "permission_error",
+			}})
+			return
+		}
+		c.Next()
+	}
 }

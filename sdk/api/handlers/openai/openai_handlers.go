@@ -60,9 +60,12 @@ func (h *OpenAIAPIHandler) Models() []map[string]any {
 // It returns a list of available AI models with their capabilities
 // and specifications in OpenAI-compatible format.
 func (h *OpenAIAPIHandler) OpenAIModels(c *gin.Context) {
+	// Get all available models the client key may use
+	allModels := h.modelsForClientKey(c)
+
 	if _, ok := c.Request.URL.Query()["client_version"]; ok {
 		clientVersion := c.Query("client_version")
-		body, errMarshal := codexmodels.MarshalCompact(h.codexClientModelsResponse(clientVersion))
+		body, errMarshal := codexmodels.MarshalCompact(h.codexClientModelsResponseFor(allModels, clientVersion))
 		if errMarshal != nil {
 			c.JSON(http.StatusInternalServerError, handlers.ErrorResponse{
 				Error: handlers.ErrorDetail{
@@ -75,9 +78,6 @@ func (h *OpenAIAPIHandler) OpenAIModels(c *gin.Context) {
 		h.WriteModelListResponse(c, h.HandlerType(), body)
 		return
 	}
-
-	// Get all available models
-	allModels := h.Models()
 
 	// Filter to only include the 4 required fields: id, object, created, owned_by
 	filteredModels := make([]map[string]any, len(allModels))
@@ -104,6 +104,22 @@ func (h *OpenAIAPIHandler) OpenAIModels(c *gin.Context) {
 		"object": "list",
 		"data":   filteredModels,
 	})
+}
+
+// modelsForClientKey returns the available models, without those the request's client key
+// may not use.
+func (h *OpenAIAPIHandler) modelsForClientKey(c *gin.Context) []map[string]any {
+	models := h.Models()
+	if _, restricted := h.Cfg.AllowedProvidersForAPIKey(handlers.ClientAPIKey(c)); !restricted {
+		return models
+	}
+	out := make([]map[string]any, 0, len(models))
+	for _, model := range models {
+		if id, _ := model["id"].(string); handlers.ModelAllowedForClientKey(h.Cfg, c, id) {
+			out = append(out, model)
+		}
+	}
+	return out
 }
 
 // ChatCompletions handles the /v1/chat/completions endpoint.

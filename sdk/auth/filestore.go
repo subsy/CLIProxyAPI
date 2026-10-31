@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/misc"
 	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/pluginapi"
 )
@@ -132,9 +133,14 @@ func (s *FileTokenStore) Save(ctx context.Context, auth *cliproxyauth.Auth) (str
 			if jsonEqual(existing, raw) {
 				break
 			}
-			file, errOpen := os.OpenFile(path, os.O_WRONLY|os.O_TRUNC, 0o600)
+			file, errOpen := os.OpenFile(path, os.O_WRONLY, 0o600)
 			if errOpen != nil {
 				return "", fmt.Errorf("auth filestore: open existing failed: %w", errOpen)
+			}
+			// OpenFile keeps an existing file's mode: make it private before emptying it.
+			if errPrivate := misc.MakePrivateAndTruncate(file); errPrivate != nil {
+				_ = file.Close()
+				return "", fmt.Errorf("auth filestore: prepare existing failed: %w", errPrivate)
 			}
 			if _, errWrite := file.Write(raw); errWrite != nil {
 				_ = file.Close()

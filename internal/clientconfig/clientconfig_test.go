@@ -47,3 +47,32 @@ func TestRender(t *testing.T) {
 		}
 	}
 }
+
+func TestRenderPicksKeyByPolicy(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.APIKeys = []string{"claude-key", "codex-key"}
+	cfg.APIKeyPolicies = []config.APIKeyPolicy{{APIKey: "codex-key", AllowedProviders: []string{"codex"}}}
+
+	var codex, claude bytes.Buffer
+	if err := Render(&codex, cfg, "codex", "box"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(codex.String(), `CLIPROXY_API_KEY="codex-key"`) {
+		t.Errorf("codex should get the key restricted to codex:\n%s", codex.String())
+	}
+	if err := Render(&claude, cfg, "claude", "box"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(claude.String(), "claude-key") || strings.Contains(claude.String(), "codex-key") {
+		t.Errorf("claude must get the unrestricted key, never the codex-only one:\n%s", claude.String())
+	}
+
+	cfg.APIKeys = []string{"codex-key"}
+	var none bytes.Buffer
+	if err := Render(&none, cfg, "claude", "box"); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(none.String(), "codex-key") || !strings.Contains(none.String(), "no api-key may use the claude provider") {
+		t.Errorf("with only a codex-only key, claude must get the placeholder and a note:\n%s", none.String())
+	}
+}

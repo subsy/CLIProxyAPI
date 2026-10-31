@@ -89,6 +89,21 @@ access:
     - "your-api-key-2"
     - "your-api-key-3"
 
+  # Optional: limit which upstream providers a client key may reach. A key with no policy
+  # reaches every provider, as before. A restricted key is refused with 403 when a model
+  # resolves only to providers it may not use, sees only its providers' models in
+  # /v1/models, and cannot use plugin-executor routes. Endpoints that pick a Codex
+  # credential directly (every /v1/realtime* and /v1/live* route, /v1/alpha/search and
+  # /backend-api/codex/alpha/search) need "codex". Restricted keys are refused in Home mode.
+  # Provider identifiers are the ones the model registry uses, for example "codex"
+  # (OpenAI/Codex accounts), "claude", "gemini", "xai", "devin", "antigravity", or an
+  # openai-compatibility upstream's name ("kimi" or "openai-compatible-kimi").
+  # `--client-config codex|claude` picks a key allowed that provider, preferring one
+  # restricted to it.
+  # api-key-policies:
+  #   - api-key: "your-api-key-2"
+  #     allowed-providers: ["codex"]
+
 # Optional credential concurrency and observation contracts.
 
 # credentials:
