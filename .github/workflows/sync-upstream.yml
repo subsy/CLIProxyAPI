@@ -21,12 +21,15 @@ jobs:
   sync:
     if: github.repository == 'subsy/CLIProxyAPI'
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           ref: main
           fetch-depth: 0
+          # The tests run upstream's newly merged code; keep the write token out of .git/config.
+          persist-credentials: false
 
       - name: Merge upstream
         id: merge
@@ -35,6 +38,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git remote add upstream https://github.com/router-for-me/CLIProxyAPI.git
           git fetch --quiet upstream main
+          before="$(git rev-parse HEAD)"
           if git merge-base --is-ancestor upstream/main HEAD; then
             echo "Already has upstream $(git rev-parse --short upstream/main)."
             echo "changed=false" >>"$GITHUB_OUTPUT"
@@ -45,7 +49,8 @@ jobs:
             echo "::error::upstream doesn't merge cleanly; merge it by hand and push to main"
             exit 1
           fi
-          if ! git diff --quiet HEAD^1 HEAD -- .github/workflows; then
+          # GITHUB_TOKEN may not push any commit that touches a workflow, even one later undone.
+          if git log --format= --name-only "$before..HEAD" -- .github/workflows | grep -q .; then
             echo "::error::upstream changed a workflow, which this job's token can't push; push the merge by hand"
             exit 1
           fi
@@ -65,4 +70,6 @@ jobs:
 
       - name: Push
         if: steps.merge.outputs.changed == 'true'
-        run: git push origin HEAD:main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:main
