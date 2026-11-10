@@ -111,53 +111,59 @@ func (s *FileTokenStore) Save(ctx context.Context, auth *cliproxyauth.Auth) (str
 		SetMetadata(map[string]any)
 	}
 
-	switch {
-	case auth.Storage != nil:
-		if auth.Metadata == nil {
-			auth.Metadata = make(map[string]any)
+	if handled, errCodex := cliproxyauth.PersistCodexAuthFile(ctx, path, auth); handled {
+		if errCodex != nil {
+			return "", errCodex
 		}
-		auth.Metadata["disabled"] = auth.Disabled
-		if setter, ok := auth.Storage.(metadataSetter); ok {
-			setter.SetMetadata(auth.Metadata)
-		}
-		if err = auth.Storage.SaveTokenToFile(path); err != nil {
-			return "", err
-		}
-	case auth.Metadata != nil:
-		auth.Metadata["disabled"] = auth.Disabled
-		raw, errMarshal := json.Marshal(auth.Metadata)
-		if errMarshal != nil {
-			return "", fmt.Errorf("auth filestore: marshal metadata failed: %w", errMarshal)
-		}
-		if existing, errRead := os.ReadFile(path); errRead == nil {
-			if jsonEqual(existing, raw) {
-				break
+	} else {
+		switch {
+		case auth.Storage != nil:
+			if auth.Metadata == nil {
+				auth.Metadata = make(map[string]any)
 			}
-			file, errOpen := os.OpenFile(path, os.O_WRONLY, 0o600)
-			if errOpen != nil {
-				return "", fmt.Errorf("auth filestore: open existing failed: %w", errOpen)
+			auth.Metadata["disabled"] = auth.Disabled
+			if setter, ok := auth.Storage.(metadataSetter); ok {
+				setter.SetMetadata(auth.Metadata)
 			}
-			// OpenFile keeps an existing file's mode: make it private before emptying it.
-			if errPrivate := misc.MakePrivateAndTruncate(file); errPrivate != nil {
-				_ = file.Close()
-				return "", fmt.Errorf("auth filestore: prepare existing failed: %w", errPrivate)
+			if err = auth.Storage.SaveTokenToFile(path); err != nil {
+				return "", err
 			}
-			if _, errWrite := file.Write(raw); errWrite != nil {
-				_ = file.Close()
-				return "", fmt.Errorf("auth filestore: write existing failed: %w", errWrite)
+		case auth.Metadata != nil:
+			auth.Metadata["disabled"] = auth.Disabled
+			raw, errMarshal := json.Marshal(auth.Metadata)
+			if errMarshal != nil {
+				return "", fmt.Errorf("auth filestore: marshal metadata failed: %w", errMarshal)
 			}
-			if errClose := file.Close(); errClose != nil {
-				return "", fmt.Errorf("auth filestore: close existing failed: %w", errClose)
+			if existing, errRead := os.ReadFile(path); errRead == nil {
+				if jsonEqual(existing, raw) {
+					break
+				}
+				file, errOpen := os.OpenFile(path, os.O_WRONLY, 0o600)
+				if errOpen != nil {
+					return "", fmt.Errorf("auth filestore: open existing failed: %w", errOpen)
+				}
+				// OpenFile keeps an existing file's mode: make it private before emptying it.
+				if errPrivate := misc.MakePrivateAndTruncate(file); errPrivate != nil {
+					_ = file.Close()
+					return "", fmt.Errorf("auth filestore: prepare existing failed: %w", errPrivate)
+				}
+				if _, errWrite := file.Write(raw); errWrite != nil {
+					_ = file.Close()
+					return "", fmt.Errorf("auth filestore: write existing failed: %w", errWrite)
+				}
+				if errClose := file.Close(); errClose != nil {
+					return "", fmt.Errorf("auth filestore: close existing failed: %w", errClose)
+				}
+			} else if os.IsNotExist(errRead) {
+				if errWrite := os.WriteFile(path, raw, 0o600); errWrite != nil {
+					return "", fmt.Errorf("auth filestore: write file failed: %w", errWrite)
+				}
+			} else {
+				return "", fmt.Errorf("auth filestore: read existing failed: %w", errRead)
 			}
-			break
-		} else if !os.IsNotExist(errRead) {
-			return "", fmt.Errorf("auth filestore: read existing failed: %w", errRead)
+		default:
+			return "", fmt.Errorf("auth filestore: nothing to persist for %s", auth.ID)
 		}
-		if errWrite := os.WriteFile(path, raw, 0o600); errWrite != nil {
-			return "", fmt.Errorf("auth filestore: write file failed: %w", errWrite)
-		}
-	default:
-		return "", fmt.Errorf("auth filestore: nothing to persist for %s", auth.ID)
 	}
 
 	if auth.Attributes == nil {

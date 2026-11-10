@@ -75,3 +75,26 @@ func TestSaveTokenToFile_PreservesCustomMetadata(t *testing.T) {
 		t.Errorf("weight = %v, want 42", saved["weight"])
 	}
 }
+
+func TestSaveTokenToFile_MakesCredentialFilePrivate(t *testing.T) {
+	authFilePath := filepath.Join(t.TempDir(), "codex-test.json")
+	if errWrite := os.WriteFile(authFilePath, []byte(`{"type":"codex"}`), 0o644); errWrite != nil {
+		t.Fatalf("os.WriteFile error = %v", errWrite)
+	}
+	if errChmod := os.Chmod(authFilePath, 0o644); errChmod != nil {
+		t.Fatalf("os.Chmod error = %v", errChmod)
+	}
+
+	storage := &CodexTokenStorage{Email: "user@example.com", AccessToken: "access-token"}
+	if errSave := storage.SaveTokenToFile(authFilePath); errSave != nil {
+		t.Fatalf("SaveTokenToFile() error = %v", errSave)
+	}
+
+	info, errStat := os.Stat(authFilePath)
+	if errStat != nil {
+		t.Fatalf("os.Stat error = %v", errStat)
+	}
+	if mode := info.Mode().Perm(); mode != 0o600 {
+		t.Fatalf("credential file mode = %o, want 600", mode)
+	}
+}
