@@ -34,6 +34,7 @@ func (s *Server) registerManagementV8Routes() {
 	v8.POST("/routing/model-definitions/refresh", s.mgmt.RefreshModelDefinitions)
 	v8.POST("/models/refresh", s.mgmt.RefreshModelDefinitions)
 	v8.GET("/routing/overview", s.mgmt.GetRoutingOverview)
+	v8.GET("/routing/quota-history", s.mgmt.GetQuotaHistory)
 	v8.GET("/client-config/:client", s.mgmt.GetClientConfig)
 
 	v8.GET("/observability/logs", s.mgmt.GetLogs)
