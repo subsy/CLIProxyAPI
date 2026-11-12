@@ -148,3 +148,21 @@ func TestQuotaHistoryIgnoresDriftingResetTimes(t *testing.T) {
 		t.Fatalf("drifting reset should neither add an unchanged sample nor split the throttle gap: %+v", samples)
 	}
 }
+
+func TestHistoryLineEscapesAndRoundTrips(t *testing.T) {
+	sample := HistorySample{At: 1_800_000_000, Windows: []HistoryWindow{{Key: "7d", Used: 0.25, ResetAt: 1_800_100_000}, {Key: "7d_opus", Used: 1}}}
+	line := appendHistoryLine(nil, `odd"id`, sample)
+	path := filepath.Join(t.TempDir(), HistoryFileName)
+	if errWrite := os.WriteFile(path, line, 0o600); errWrite != nil {
+		t.Fatalf("write: %v", errWrite)
+	}
+	h := NewQuotaHistory()
+	h.path = path
+	if errLoad := h.load(); errLoad != nil {
+		t.Fatalf("load: %v", errLoad)
+	}
+	got := h.Snapshot()[`odd"id`]
+	if len(got) != 1 || !sameWindows(got[0].Windows, sample.Windows) || got[0].At != sample.At {
+		t.Fatalf("round trip of %s gave %+v", line, got)
+	}
+}

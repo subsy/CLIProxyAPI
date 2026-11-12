@@ -45,6 +45,9 @@ type HistorySample struct {
 // QuotaHistory keeps a rolling record of day-or-longer quota windows per credential so the
 // dashboard can draw remaining quota over time. Only changes are recorded.
 type QuotaHistory struct {
+	// ioMu serializes Record calls so an append can't land between a compaction's snapshot
+	// and its rename, which would drop the appended sample from the file.
+	ioMu        sync.Mutex
 	mu          sync.Mutex
 	samples     map[string][]HistorySample
 	path        string
@@ -102,6 +105,8 @@ func (h *QuotaHistory) Record(auths []*coreauth.Auth) {
 	if h == nil {
 		return
 	}
+	h.ioMu.Lock()
+	defer h.ioMu.Unlock()
 	now := h.now()
 	type pending struct {
 		id     string
@@ -256,26 +261,19 @@ func (h *QuotaHistory) pruneLocked(now time.Time) {
 // File format: one JSON object per line, {"id":"...","t":unix,"w":[{"k":"7d","u":0.4,"r":unix}]}.
 
 func appendHistoryLine(dst []byte, id string, sample HistorySample) []byte {
-	dst = append(dst, `{"id":`...)
-	dst = ojson.AppendJSONString(dst, id)
-	dst = append(dst, `,"t":`...)
-	dst = strconv.AppendInt(dst, sample.At, 10)
-	dst = append(dst, `,"w":[`...)
+	doc := ojson.NewDocString("{}")
+	_ = doc.Set("id", id)
+	_ = doc.Set("t", sample.At)
+	_ = doc.SetRaw("w", "[]")
 	for i, window := range sample.Windows {
-		if i > 0 {
-			dst = append(dst, ',')
-		}
-		dst = append(dst, `{"k":`...)
-		dst = ojson.AppendJSONString(dst, window.Key)
-		dst = append(dst, `,"u":`...)
-		dst = strconv.AppendFloat(dst, window.Used, 'f', -1, 64)
+		prefix := "w." + strconv.Itoa(i) + "."
+		_ = doc.Set(prefix+"k", window.Key)
+		_ = doc.Set(prefix+"u", window.Used)
 		if window.ResetAt != 0 {
-			dst = append(dst, `,"r":`...)
-			dst = strconv.AppendInt(dst, window.ResetAt, 10)
+			_ = doc.Set(prefix+"r", window.ResetAt)
 		}
-		dst = append(dst, '}')
 	}
-	return append(dst, "]}\n"...)
+	return append(doc.AppendTo(dst), '\n')
 }
 
 func (h *QuotaHistory) load() error {

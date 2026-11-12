@@ -630,7 +630,8 @@
           if (w) points.push({ t: s.t * 1000, u: w.u, r: w.r ? w.r * 1000 : 0 });
         }
         if (cw && isSet(c.quota_observed_at)) {
-          const t = ts(c.quota_observed_at);
+          // Clamped to this browser's clock so a server clock slightly ahead can't push it past "now".
+          const t = Math.min(ts(c.quota_observed_at), Date.now());
           if (!points.length || t > points[points.length - 1].t) points.push({ t, u: cw.used_fraction, r: isSet(cw.reset_at) ? ts(cw.reset_at) : 0 });
         }
         if (points.length) entry.accounts.push({ len: ((cw && cw.window_minutes) || 7 * 1440) * 60000, points });
@@ -640,7 +641,7 @@
       .sort((a, b) => (isBaseKey(b.key) - isBaseKey(a.key)) || a.label.localeCompare(b.label));
   }
 
-  // Latest reading at or before t; before the first reading the first one stands in.
+  // Latest reading at or before t (the first one for earlier times).
   function pointAt(acct, t) {
     return acct.points[Math.max(0, countAtOrBefore(acct.points, t, (p) => p.t) - 1)];
   }
@@ -661,7 +662,8 @@
     return out;
   }
 
-  const remainingAt = (s, t) => s.accounts.reduce((sum, a) => sum + 1 - usedAt(a, t), 0);
+  // An account counts from its first reading on, so one added later doesn't inflate earlier days.
+  const remainingAt = (s, t) => s.accounts.reduce((sum, a) => (a.points[0].t > t ? sum : sum + 1 - usedAt(a, t)), 0);
 
   function computeSeries(s, range, now) {
     if (!s.events) {
