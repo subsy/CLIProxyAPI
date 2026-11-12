@@ -201,6 +201,10 @@
     padding: 5px 9px; font-size: 12px; color: var(--muted); white-space: nowrap; box-shadow: 0 4px 14px -6px rgba(0,0,0,.35); }
   .qt-tip b { color: var(--ink); font-weight: 650; margin-right: 4px; }
   .qt-none { color: var(--muted); font-size: 13px; margin-top: 4px; }
+  .qt-table { margin-top: 6px; font-size: 12.5px; color: var(--muted); }
+  .qt-table summary { cursor: pointer; }
+  .qt-table table { margin-top: 6px; max-width: 640px; }
+  .qt-table td, .qt-table th { padding: 4px 10px; }
   .connect { max-width: 440px; margin: 64px auto; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 20px; }
   .connect h2 { margin-bottom: 6px; }
   .connect input { width: 100%; padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--ink); margin: 12px 0; }
@@ -634,10 +638,14 @@
           const t = Math.min(ts(c.quota_observed_at), Date.now());
           if (!points.length || t > points[points.length - 1].t) points.push({ t, u: cw.used_fraction, r: isSet(cw.reset_at) ? ts(cw.reset_at) : 0 });
         }
-        if (points.length) entry.accounts.push({ len: ((cw && cw.window_minutes) || 7 * 1440) * 60000, points });
+        // An account that reports long windows now, but not this one, has dropped it: it stays in
+        // the past line up to its last reading and is left out of today's total and the projection.
+        // One with no current reading at all (not observed since a restart) keeps its last reading.
+        const retired = current.length > 0 && !cw;
+        if (points.length) entry.accounts.push({ len: ((cw && cw.window_minutes) || 7 * 1440) * 60000, points, retired });
       }
     }
-    return [...series.values()].filter((s) => s.accounts.length)
+    return [...series.values()].filter((s) => s.accounts.some((a) => !a.retired))
       .sort((a, b) => (isBaseKey(b.key) - isBaseKey(a.key)) || a.label.localeCompare(b.label));
   }
 
@@ -663,7 +671,9 @@
   }
 
   // An account counts from its first reading on, so one added later doesn't inflate earlier days.
-  const remainingAt = (s, t) => s.accounts.reduce((sum, a) => (a.points[0].t > t ? sum : sum + 1 - usedAt(a, t)), 0);
+  const counted = (a, t) => a.points[0].t <= t && !(a.retired && t > a.points[a.points.length - 1].t);
+  const remainingAt = (s, t) => s.accounts.reduce((sum, a) => (counted(a, t) ? sum + 1 - usedAt(a, t) : sum), 0);
+  const currentAccounts = (s) => s.accounts.filter((a) => !a.retired);
 
   function computeSeries(s, range, now) {
     if (!s.events) {
@@ -677,7 +687,7 @@
     };
     const span = qt.burnHours * HOUR;
     const rateAt = (t) => (usedBy(t) - usedBy(t - span)) / qt.burnHours;
-    const capacity = s.accounts.length;
+    const capacity = currentAccounts(s).length;
     const burn = rateAt(now);
     const remaining = remainingAt(s, now);
 
@@ -695,7 +705,7 @@
     let emptyAt = null;
     if (range.end > now) {
       const demand = burn * qt.factor;
-      const state = s.accounts.map((a) => {
+      const state = currentAccounts(s).map((a) => {
         const p = pointAt(a, now);
         let r = p.r || Infinity;
         while (r <= now) r += a.len;
@@ -811,7 +821,7 @@
     const r = computeSeries(s, range, now);
     const picker = series.length > 1 ? segmented(series.map((x) => [x.key, x.label + " ", el("span", { class: "count" }, fmtLeft(remainingAt(x, now)))]), s.key,
       (v) => setQuotaView({ series: { ...qt.series, [provider]: v } }), "Quota window") : null;
-    const excluded = creds.length - s.accounts.length;
+    const excluded = creds.length - r.capacity;
     let outlook;
     if (r.burn <= 0) outlook = "No usage in the last " + qt.burnHours + "h";
     else if (qt.factor === 0) outlook = "Projection assumes no more use";
@@ -819,12 +829,13 @@
     else if (r.emptyAt === null && range.end > now) outlook = "Lasts past " + new Date(range.lastDay).toLocaleDateString([], { weekday: "short", day: "numeric" });
     return el("section", { class: "qt-card" },
       el("div", { class: "qt-head" }, logo(provider), el("h3", {}, providerName(provider)),
-        el("span", { class: "meta" }, s.accounts.length + (s.accounts.length === 1 ? " account" : " accounts") + (excluded > 0 ? " · " + excluded + " not counted (disabled, needs login or no quota data)" : "")),
+        el("span", { class: "meta" }, r.capacity + (r.capacity === 1 ? " account" : " accounts") + (excluded > 0 ? " · " + excluded + " not counted (disabled, needs login or no quota data)" : "")),
         picker),
       el("div", { class: "qt-figures" },
         el("div", {}, el("span", { class: "qt-big" }, fmtLeft(r.remaining)), el("span", { class: "qt-of" }, "of " + fmtLeft(r.capacity))),
         el("div", { class: "qt-burn" }, "Burn, last " + qt.burnHours + "h", el("b", {}, fmtRate(r.burn)), outlook || null)),
-      quotaChart(provider, s, r, range, now));
+      quotaChart(provider, s, r, range, now),
+      quotaTable(r, range, now));
   }
 
   function quotaChart(provider, s, r, range, now) {
@@ -913,6 +924,29 @@
   }
 
   let historyLoading = false;
+  // The chart's values as a table, one row per day plus now and the run-out time, so they can
+  // be read without a pointer.
+  function quotaTable(r, range, now) {
+    const points = [...r.past, ...r.future];
+    if (!points.length) return null;
+    const times = [];
+    for (let d = new Date(range.start); d.getTime() < range.end; d.setDate(d.getDate() + 1)) times.push(d.getTime());
+    if (now > range.start && now < range.end) times.push(now);
+    if (r.emptyAt !== null && r.emptyAt > now && r.emptyAt < range.end) times.push(r.emptyAt);
+    const rows = times.sort((a, b) => a - b).flatMap((t) => {
+      const n = countAtOrBefore(points, t, (p) => p.t);
+      if (!n) return [];
+      const p = points[n - 1];
+      const label = t === now ? "Now" : t === r.emptyAt ? "Runs out" : t > now ? "Projected" : "";
+      return [el("tr", {}, el("td", {}, new Date(t).toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })),
+        el("td", { class: "num" }, fmtLeft(p.v)), el("td", { class: "num" }, fmtRate(p.rate)), el("td", {}, label))];
+    });
+    return el("details", { class: "qt-table" }, el("summary", {}, "Show as a table"),
+      el("div", { class: "table-wrap" }, el("table", {},
+        el("thead", {}, el("tr", {}, el("th", {}, "Time"), el("th", {}, "Quota left"), el("th", {}, "Usage per hour"), el("th", {}, ""))),
+        el("tbody", {}, rows))));
+  }
+
   async function loadHistory(key) {
     if (historyLoading || Date.now() - qt.historyAt < HISTORY_REFRESH_MS) return;
     historyLoading = true;

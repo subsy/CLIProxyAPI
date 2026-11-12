@@ -147,6 +147,7 @@ func (h *QuotaHistory) Record(auths []*coreauth.Auth) {
 	if compact {
 		if errSave := h.save(); errSave != nil {
 			log.Warnf("quota history: failed to write %s: %v", path, errSave)
+			h.retrySave()
 		}
 		return
 	}
@@ -159,7 +160,16 @@ func (h *QuotaHistory) Record(auths []*coreauth.Auth) {
 	}
 	if errAppend := appendFile(path, buf); errAppend != nil {
 		log.Warnf("quota history: failed to append to %s: %v", path, errAppend)
+		h.retrySave()
 	}
+}
+
+// retrySave makes the next Record rewrite the whole file, so samples a failed write left only
+// in memory reach the file a minute later rather than at the next daily compaction.
+func (h *QuotaHistory) retrySave() {
+	h.mu.Lock()
+	h.lastCompact = time.Time{}
+	h.mu.Unlock()
 }
 
 // Snapshot returns a copy of the recorded samples per credential ID.

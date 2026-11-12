@@ -166,3 +166,33 @@ func TestHistoryLineEscapesAndRoundTrips(t *testing.T) {
 		t.Fatalf("round trip of %s gave %+v", line, got)
 	}
 }
+
+func TestQuotaHistoryRewritesFileAfterFailedWrite(t *testing.T) {
+	start := time.Unix(1_800_000_000, 0)
+	reset := start.Add(48 * time.Hour)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "missing", HistoryFileName)
+	clock := start
+	h := NewQuotaHistory()
+	h.now = func() time.Time { return clock }
+	h.path = path
+	h.lastCompact = start
+
+	// The directory doesn't exist yet, so this append fails and the sample stays in memory only.
+	h.Record([]*coreauth.Auth{claudeAt("a", start, "0.2", reset)})
+	if errMkdir := os.Mkdir(filepath.Join(dir, "missing"), 0o700); errMkdir != nil {
+		t.Fatalf("mkdir: %v", errMkdir)
+	}
+	// Unchanged reading: nothing new to append, but the failed sample must still reach the file.
+	clock = start.Add(time.Minute)
+	h.Record([]*coreauth.Auth{claudeAt("a", start.Add(time.Minute), "0.2", reset)})
+
+	reloaded := NewQuotaHistory()
+	reloaded.path = path
+	if errLoad := reloaded.load(); errLoad != nil {
+		t.Fatalf("load: %v", errLoad)
+	}
+	if got := reloaded.Snapshot()["a"]; len(got) != 1 || got[0].Windows[0].Used != 0.2 {
+		t.Fatalf("sample from the failed append was not written later: %+v", got)
+	}
+}
