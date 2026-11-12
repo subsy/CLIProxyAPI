@@ -171,6 +171,40 @@
   details.help p { margin: 8px 0; }
   details.help b { color: var(--ink); font-weight: 600; }
 
+  /* Quota over time */
+  .qt-controls { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin-bottom: 12px; }
+  .seg { display: inline-flex; gap: 2px; padding: 2px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+  .seg button { border: 0; background: transparent; color: var(--muted); padding: 4px 10px; border-radius: 6px; display: inline-flex; align-items: center; gap: 6px; }
+  .seg button:hover { color: var(--ink); }
+  .seg button[aria-pressed="true"] { background: var(--track); color: var(--ink); font-weight: 600; }
+  .seg button .count { color: var(--faint); font-weight: 400; }
+  .seg .logo { width: 14px; height: 14px; }
+  .ctl { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; }
+  .ctl select { font: inherit; color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; }
+  .range-nav { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; }
+  .range-nav .meta { margin-right: 4px; }
+  .range-nav button { padding: 4px 9px; }
+  .qt-cards { display: grid; gap: 12px; }
+  .qt-card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px 10px; }
+  .qt-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .qt-head h3 { margin: 0; font-size: 15px; font-weight: 650; }
+  .qt-head .seg { margin-left: auto; }
+  .qt-figures { display: flex; align-items: flex-end; gap: 16px; margin: 8px 0 2px; flex-wrap: wrap; }
+  .qt-big { font-size: 40px; line-height: 1; font-weight: 650; letter-spacing: -.02em; }
+  .qt-of { color: var(--muted); font-size: 15px; margin-left: 6px; }
+  .qt-burn { margin-left: auto; text-align: right; color: var(--muted); font-size: 12.5px; }
+  .qt-burn b { display: block; color: var(--ink); font-size: 16px; font-weight: 650; }
+  .qt-chart { position: relative; }
+  .qt-chart svg { display: block; width: 100%; overflow: visible; }
+  .qt-chart text { font-size: 11.5px; fill: var(--muted); }
+  .qt-tip { position: absolute; pointer-events: none; z-index: 4; background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+    padding: 5px 9px; font-size: 12px; color: var(--muted); white-space: nowrap; box-shadow: 0 4px 14px -6px rgba(0,0,0,.35); }
+  .qt-tip b { color: var(--ink); font-weight: 650; margin-right: 4px; }
+  .qt-none { color: var(--muted); font-size: 13px; margin-top: 4px; }
+  .qt-table { margin-top: 6px; font-size: 12.5px; color: var(--muted); }
+  .qt-table summary { cursor: pointer; }
+  .qt-table table { margin-top: 6px; max-width: 640px; }
+  .qt-table td, .qt-table th { padding: 4px 10px; }
   .connect { max-width: 440px; margin: 64px auto; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 20px; }
   .connect h2 { margin-bottom: 6px; }
   .connect input { width: 100%; padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--ink); margin: 12px 0; }
@@ -205,6 +239,11 @@
     <div id="notices"></div>
     <ul class="status-line" id="statusLine"></ul>
 
+    <div class="section-head"><h2>Quota over time</h2>
+      <span class="meta">Weekly quota left across each provider’s accounts (100% per account). The dashed line projects ahead at the chosen pace, with each account refilling at its weekly reset.</span></div>
+    <div class="qt-controls" id="qtControls"></div>
+    <div class="qt-cards" id="qtCards"></div>
+
     <div class="section-head"><h2>Draw-down order</h2>
       <span class="meta" id="lanesNote"></span></div>
     <div class="lanes" id="lanes"></div>
@@ -224,6 +263,7 @@
 
     <details class="help">
       <summary>How to read this</summary>
+      <p><b>Quota over time</b> adds up the weekly quota left on every enabled account of a provider: seven Claude accounts give 700%. The proxy reads quota from each response and saves changes to <code>quota-history.jsonl</code> next to the config, keeping four weeks. <b>Burn</b> is how much was used over the chosen last 1, 3, 6 or 24 hours. The projection spends that much per hour (or the share you pick under <b>Future usage</b>), drawing from the account that resets soonest, and refills each account at its weekly reset. <b>Drain rate</b> shows the same usage per hour instead of what is left. 5-hour limits are not modelled, so a heavy pace can stall sooner than shown.</p>
       <p><b>Draw-down order</b> is the order the current strategy tries accounts in. With <b>reset-soonest</b>, the account whose weekly window resets first is drained first, because its remaining quota is lost at reset. Accounts not seen since start-up get one request so their reset time is learned. Accounts whose 5-hour window is nearly full are moved to the back. With round-robin, all usable accounts share traffic evenly.</p>
       <p>A green dot marks an account that served a request in the last three minutes.</p>
       <p><b>Expires unused</b> is the share of a weekly window that would be lost at reset if usage continues at the current pace. The thin marker on a meter shows where usage is heading by reset.</p>
@@ -249,8 +289,13 @@
     gemini: "M11.04 19.32Q12 21.51 12 24q0-2.49.93-4.68.96-2.19 2.58-3.81t3.81-2.55Q21.51 12 24 12q-2.49 0-4.68-.93a12.3 12.3 0 0 1-3.81-2.58 12.3 12.3 0 0 1-2.58-3.81Q12 2.49 12 0q0 2.49-.96 4.68-.93 2.19-2.55 3.81a12.3 12.3 0 0 1-3.81 2.58Q2.49 12 0 12q2.49 0 4.68.96 2.19.93 3.81 2.55t2.55 3.81",
   };
   LOGOS["gemini-cli"] = LOGOS.gemini; LOGOS.vertex = LOGOS.gemini; LOGOS.aistudio = LOGOS.gemini; LOGOS.openai = LOGOS.codex;
-  const PROVIDER_NAMES = { claude: "Claude", codex: "Codex", gemini: "Gemini", "gemini-cli": "Gemini CLI", vertex: "Vertex", aistudio: "AI Studio", openai: "OpenAI" };
-  const providerName = (p) => PROVIDER_NAMES[p] || p;
+  const PROVIDER_NAMES = { claude: "Claude", codex: "Codex", gemini: "Gemini", "gemini-cli": "Gemini CLI", vertex: "Vertex", aistudio: "AI Studio", openai: "OpenAI",
+    xai: "xAI", meta: "Meta", devin: "Devin", kimi: "Kimi", qwen: "Qwen", iflow: "iFlow", antigravity: "Antigravity" };
+  const providerName = (p) => {
+    if (PROVIDER_NAMES[p]) return PROVIDER_NAMES[p];
+    const name = String(p || "").replace(/^openai-compatible-/, "");
+    return PROVIDER_NAMES[name] || name.charAt(0).toUpperCase() + name.slice(1);
+  };
 
   const svg = (tag, attrs, ...children) => {
     const node = document.createElementNS(SVG_NS, tag);
@@ -314,10 +359,12 @@
   const level = (used) => used >= 0.98 ? "bad" : used >= 0.8 ? "warn" : "";
   const ordered = (strategy) => strategy === "reset-soonest" || strategy === "fill-first";
 
+  // The main weekly window keys of Claude and Codex credentials.
+  const isBaseKey = (k) => k === "7d" || k === "primary";
   // The weekly window that routing cares about: the credential's own longest window.
   function weeklyWindow(c) {
     return c.windows.filter((w) => !w.limit && w.window_minutes >= 1440 && isSet(w.reset_at))
-      .sort((a, b) => (a.key === "7d" || a.key === "primary" ? -1 : 0) - (b.key === "7d" || b.key === "primary" ? -1 : 0))[0];
+      .sort((a, b) => isBaseKey(b.key) - isBaseKey(a.key))[0];
   }
   const fiveHourWindow = (c) => c.windows.find((w) => !w.limit && w.window_minutes > 0 && w.window_minutes < 1440 && isSet(w.reset_at));
 
@@ -531,6 +578,402 @@
         el("tbody", {}, rows))));
   }
 
+  /* ---------- Quota over time ---------- */
+  const STEP = 10 * 60000;
+  const HISTORY_REFRESH_MS = 5 * 60000;
+  const FUTURE = [["Same as now", 1], ["Half as much", 0.5], ["Twice as much", 2], ["None", 0]];
+  const BURN_HOURS = [1, 3, 6, 24];
+  const SERIES_COLORS = { claude: "var(--claude)", codex: "var(--openai)", openai: "var(--openai)", gemini: "var(--gemini)" };
+  const MODEL_NAMES = { opus: "Opus", sonnet: "Sonnet", fable: "Fable", haiku: "Haiku" };
+  const QT_PREFS_KEY = "cpa-routing-dashboard-quota-view";
+  const qt = { provider: "all", view: "remaining", burnHours: 3, factor: 1, weekOffset: 0, series: {}, history: new Map(), historyAt: 0, data: null, cache: {}, openTables: new Set() };
+  try { Object.assign(qt, JSON.parse(localStorage.getItem(QT_PREFS_KEY) || "{}")); } catch (err) { /* ignore a malformed saved view */ }
+  // Reset times derived from "resets in N seconds" drift a little between readings.
+  const RESET_TOLERANCE_MS = 120000;
+  const fmtLeft = (v) => Math.round(v * 100) + "%";
+  const fmtRate = (r) => (r * 100).toFixed(r * 100 >= 10 ? 0 : 1) + "%/h";
+  // The chart spans two weeks, so run-out times carry the day of the month too.
+  const whenDay = (t) => new Date(t).toLocaleString([], { weekday: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  // Applies a control change, remembers the view in this browser and redraws.
+  function setQuotaView(patch) {
+    Object.assign(qt, patch);
+    localStorage.setItem(QT_PREFS_KEY, JSON.stringify({ provider: qt.provider, view: qt.view, burnHours: qt.burnHours, factor: qt.factor, series: qt.series }));
+    renderQuota();
+  }
+  // Number of items in a time-sorted array at or before t.
+  function countAtOrBefore(items, t, timeOf) {
+    let lo = 0, hi = items.length;
+    while (lo < hi) { const m = (lo + hi) >> 1; if (timeOf(items[m]) <= t) lo = m + 1; else hi = m; }
+    return lo;
+  }
+
+  function seriesLabel(key, limit) {
+    if (isBaseKey(key)) return "All models";
+    if (limit) return limit;
+    const suffix = key.includes("_") ? key.slice(key.indexOf("_") + 1) : key;
+    return MODEL_NAMES[suffix] || suffix;
+  }
+
+  // Builds one series per long quota window key, each with the per-account readings over time.
+  function buildSeries(credentials) {
+    const series = new Map();
+    for (const c of credentials) {
+      // Quota on a disabled account or one that needs a new login can't be spent.
+      if (c.disabled || c.status === "disabled" || c.needs_relogin) continue;
+      const samples = qt.history.get(c.id) || [];
+      const current = c.windows.filter((w) => w.window_minutes >= 1440 && w.used_fraction >= 0);
+      const keys = new Set([...current.map((w) => w.key), ...samples.flatMap((s) => s.w.map((w) => w.k))]);
+      for (const key of keys) {
+        const cw = current.find((w) => w.key === key);
+        let entry = series.get(key);
+        if (!entry) { entry = { key, label: seriesLabel(key), accounts: [] }; series.set(key, entry); }
+        if (cw) entry.label = seriesLabel(key, cw.limit);
+        const points = [];
+        for (const s of samples) {
+          const w = s.w.find((x) => x.k === key);
+          if (w) points.push({ t: s.t * 1000, u: w.u, r: w.r ? w.r * 1000 : 0 });
+        }
+        if (cw && isSet(c.quota_observed_at)) {
+          // Clamped to this browser's clock so a server clock slightly ahead can't push it past "now".
+          const t = Math.min(ts(c.quota_observed_at), Date.now());
+          if (!points.length || t > points[points.length - 1].t) points.push({ t, u: cw.used_fraction, r: isSet(cw.reset_at) ? ts(cw.reset_at) : 0 });
+        }
+        // An account that reports long windows now, but not this one, has dropped it: it stays in
+        // the past line up to its last reading and is left out of today's total and the projection.
+        // One with no current reading at all (not observed since a restart) keeps its last reading.
+        const retired = current.length > 0 && !cw;
+        if (points.length) entry.accounts.push({ len: ((cw && cw.window_minutes) || 7 * 1440) * 60000, points, retired });
+      }
+    }
+    return [...series.values()].filter((s) => s.accounts.some((a) => !a.retired))
+      .sort((a, b) => (isBaseKey(b.key) - isBaseKey(a.key)) || a.label.localeCompare(b.label));
+  }
+
+  // Latest reading at or before t (the first one for earlier times).
+  function pointAt(acct, t) {
+    return acct.points[Math.max(0, countAtOrBefore(acct.points, t, (p) => p.t) - 1)];
+  }
+  function usedAt(acct, t) {
+    const p = pointAt(acct, t);
+    return p.r && t >= p.r ? 0 : Math.min(1, Math.max(0, p.u));
+  }
+
+  // Usage between consecutive readings, dated at the later one. A new window counts from zero.
+  function burnEvents(acct) {
+    const out = [];
+    for (let i = 1; i < acct.points.length; i++) {
+      const a = acct.points[i - 1], b = acct.points[i];
+      const sameWindow = !a.r || !b.r || Math.abs(b.r - a.r) <= RESET_TOLERANCE_MS;
+      const inc = sameWindow ? b.u - a.u : b.r > a.r ? b.u : 0;
+      if (inc > 0) out.push([b.t, Math.min(1, inc)]);
+    }
+    return out;
+  }
+
+  // An account counts from its first reading on, so one added later doesn't inflate earlier days.
+  const counted = (a, t) => a.points[0].t <= t && !(a.retired && t > a.points[a.points.length - 1].t);
+  const remainingAt = (s, t) => s.accounts.reduce((sum, a) => (counted(a, t) ? sum + 1 - usedAt(a, t) : sum), 0);
+  const currentAccounts = (s) => s.accounts.filter((a) => !a.retired);
+
+  function computeSeries(s, range, now) {
+    if (!s.events) {
+      s.events = s.accounts.flatMap(burnEvents).sort((a, b) => a[0] - b[0]);
+      let sum = 0;
+      s.cum = s.events.map((e) => (sum += e[1]));
+    }
+    const usedBy = (t) => {
+      const n = countAtOrBefore(s.events, t, (e) => e[0]);
+      return n ? s.cum[n - 1] : 0;
+    };
+    const span = qt.burnHours * HOUR;
+    const rateAt = (t) => (usedBy(t) - usedBy(t - span)) / qt.burnHours;
+    const capacity = currentAccounts(s).length;
+    const burn = rateAt(now);
+    const remaining = remainingAt(s, now);
+
+    const past = [];
+    const firstSeen = Math.min(...s.accounts.map((a) => a.points[0].t));
+    const from = Math.max(range.start, firstSeen), to = Math.min(range.end, now);
+    if (to > from) {
+      const times = [from];
+      for (let t = Math.ceil(from / STEP) * STEP; t < to; t += STEP) if (t > from) times.push(t);
+      times.push(to);
+      for (const t of times) past.push({ t, v: remainingAt(s, t), rate: rateAt(t) });
+    }
+
+    const future = [];
+    let emptyAt = null;
+    if (range.end > now) {
+      const demand = burn * qt.factor;
+      const state = currentAccounts(s).map((a) => {
+        const p = pointAt(a, now);
+        let r = p.r || Infinity;
+        while (r <= now) r += a.len;
+        return { u: usedAt(a, now), r, len: a.len };
+      });
+      const left = () => state.reduce((sum, st) => sum + 1 - st.u, 0);
+      future.push({ t: now, v: remaining, rate: demand });
+      let t = now;
+      while (t < range.end) {
+        const next = Math.min(range.end, t + STEP, ...state.map((st) => st.r));
+        const hours = (next - t) / HOUR;
+        const want = demand * hours;
+        let need = want;
+        // Spend from the account that resets soonest, as reset-soonest routing does.
+        for (const st of [...state].sort((a, b) => a.r - b.r)) {
+          if (need <= 0) break;
+          const take = Math.min(1 - st.u, need);
+          st.u += take; need -= take;
+        }
+        const spent = want - need;
+        if (need > 1e-9 && want > 0) {
+          const at = t + (next - t) * (spent / want);
+          if (emptyAt === null) emptyAt = at;
+          if (spent > 0) future.push({ t: at, v: 0, rate: demand });
+        }
+        future.push({ t: next, v: left(), rate: need > 1e-9 ? 0 : demand });
+        if (state.some((st) => st.r <= next)) {
+          for (const st of state) while (st.r <= next) { st.u = 0; st.r += st.len; }
+          future.push({ t: next, v: left(), rate: demand });
+        }
+        t = next;
+      }
+    }
+    // The simulation always starts now; on a later week keep only what falls in the range.
+    if (future.length && range.start > now) {
+      const i = countAtOrBefore(future, range.start, (p) => p.t);
+      const before = future[Math.max(0, i - 1)];
+      future.splice(0, i, { ...before, t: range.start });
+    }
+    return { capacity, burn, remaining, past, future, emptyAt };
+  }
+
+  function weekRange() {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    d.setDate(d.getDate() - ((d.getDay() + 6) % 7) + 7 * qt.weekOffset);
+    const start = d.getTime();
+    d.setDate(d.getDate() + 13);
+    // The last day is kept separately: subtracting 24h from the end lands on the wrong day across a DST change.
+    const lastDay = d.getTime();
+    d.setDate(d.getDate() + 1);
+    return { start, lastDay, end: d.getTime() };
+  }
+
+  function segmented(items, selected, onPick, label) {
+    return el("div", { class: "seg", role: "group", "aria-label": label },
+      items.map(([value, ...content]) => {
+        const b = el("button", { type: "button", "aria-pressed": String(value === selected) }, content);
+        b.addEventListener("click", () => onPick(value));
+        return b;
+      }));
+  }
+
+  function renderQuotaControls(byProvider, range) {
+    const total = byProvider.reduce((n, [, creds]) => n + creds.length, 0);
+    const tabs = [["all", "All ", el("span", { class: "count" }, String(total))],
+      ...byProvider.map(([p, creds]) => [p, logo(p), providerName(p) + " ", el("span", { class: "count" }, String(creds.length))])];
+    const select = el("select", { "aria-label": "Future usage" }, FUTURE.map(([label, f]) => el("option", { value: String(f), selected: f === qt.factor }, label)));
+    select.addEventListener("change", () => setQuotaView({ factor: Number(select.value) }));
+    const navButton = (text, title, offset, disabled) => {
+      const b = el("button", { type: "button", title, disabled }, text);
+      b.addEventListener("click", () => setQuotaView({ weekOffset: offset }));
+      return b;
+    };
+    const fmt = (t) => new Date(t).toLocaleDateString([], { month: "short", day: "numeric" });
+    $("qtControls").replaceChildren(
+      segmented(tabs, qt.provider, (v) => setQuotaView({ provider: v }), "Provider"),
+      segmented([["remaining", "Remaining"], ["rate", "Drain rate"]], qt.view, (v) => setQuotaView({ view: v }), "View"),
+      el("span", { class: "ctl" }, "Burn rate", segmented(BURN_HOURS.map((h) => [h, h + "h"]), qt.burnHours, (v) => setQuotaView({ burnHours: v }), "Burn rate window")),
+      el("label", { class: "ctl" }, "Future usage", select),
+      el("span", { class: "range-nav" }, el("span", { class: "meta" }, fmt(range.start) + " to " + fmt(range.lastDay)),
+        navButton("‹", "Previous week", qt.weekOffset - 1, qt.weekOffset <= -4),
+        navButton("Today", "Back to this week", 0, qt.weekOffset === 0),
+        navButton("›", "Next week", qt.weekOffset + 1, qt.weekOffset >= 3)));
+  }
+
+  function renderQuota() {
+    const data = qt.data;
+    if (!data) return;
+    const now = Date.now();
+    const range = weekRange();
+    const byProvider = groupsByProvider(data.groups);
+    if (qt.provider !== "all" && !byProvider.some(([p]) => p === qt.provider)) qt.provider = "all";
+    renderQuotaControls(byProvider, range);
+    const shown = byProvider.filter(([p]) => qt.provider === "all" || p === qt.provider);
+    const cards = [], without = [];
+    // Series depend only on the overview and the history, so they are rebuilt only when either changes.
+    if (qt.cache.data !== data || qt.cache.historyAt !== qt.historyAt) qt.cache = { data, historyAt: qt.historyAt, series: new Map() };
+    for (const [provider, creds] of shown) {
+      if (!qt.cache.series.has(provider)) qt.cache.series.set(provider, buildSeries(creds));
+      const series = qt.cache.series.get(provider);
+      if (!series.length) { without.push(providerName(provider)); continue; }
+      cards.push(renderQuotaCard(provider, creds, series, range, now));
+    }
+    if (without.length) {
+      cards.push(el("div", { class: "qt-none" }, without.join(", ") + (without.length === 1 ? " reports" : " report") + " no weekly quota, so " + (without.length === 1 ? "it isn’t" : "they aren’t") + " charted."));
+    }
+    // Keep keyboard focus on a table toggle across the redraw.
+    const active = document.activeElement;
+    const focusProvider = active && active.tagName === "SUMMARY" && active.parentElement.classList.contains("qt-table") ? active.parentElement.dataset.provider : null;
+    $("qtCards").replaceChildren(...cards);
+    if (focusProvider) {
+      const kept = [...$("qtCards").querySelectorAll(".qt-table")].find((d) => d.dataset.provider === focusProvider);
+      if (kept) kept.querySelector("summary").focus();
+    }
+  }
+
+  function renderQuotaCard(provider, creds, series, range, now) {
+    const s = series.find((x) => x.key === qt.series[provider]) || series[0];
+    const r = computeSeries(s, range, now);
+    const picker = series.length > 1 ? segmented(series.map((x) => [x.key, x.label + " ", el("span", { class: "count" }, fmtLeft(remainingAt(x, now)))]), s.key,
+      (v) => setQuotaView({ series: { ...qt.series, [provider]: v } }), "Quota window") : null;
+    const excluded = creds.length - r.capacity;
+    let outlook;
+    if (r.burn <= 0) outlook = "No usage in the last " + qt.burnHours + "h";
+    else if (qt.factor === 0) outlook = "Projection assumes no more use";
+    else if (r.emptyAt !== null && r.emptyAt > now) outlook = "Runs out " + whenDay(r.emptyAt);
+    else if (r.emptyAt === null && range.end > now) outlook = "Lasts past " + new Date(range.lastDay).toLocaleDateString([], { weekday: "short", day: "numeric" });
+    return el("section", { class: "qt-card" },
+      el("div", { class: "qt-head" }, logo(provider), el("h3", {}, providerName(provider)),
+        el("span", { class: "meta" }, r.capacity + (r.capacity === 1 ? " account" : " accounts") + (excluded > 0 ? " · " + excluded + " not counted (disabled, needs login or no quota data)" : "")),
+        picker),
+      el("div", { class: "qt-figures" },
+        el("div", {}, el("span", { class: "qt-big" }, fmtLeft(r.remaining)), el("span", { class: "qt-of" }, "of " + fmtLeft(r.capacity))),
+        el("div", { class: "qt-burn" }, "Burn, last " + qt.burnHours + "h", el("b", {}, fmtRate(r.burn)), outlook || null)),
+      quotaChart(provider, s, r, range, now),
+      quotaTable(provider, r, range, now));
+  }
+
+  function quotaChart(provider, s, r, range, now) {
+    const wrap = el("div", { class: "qt-chart" });
+    const W = Math.max(320, $("qtCards").clientWidth - 34), H = 250;
+    const ml = 46, mr = 10, mt = 22, mb = 26;
+    const rateView = qt.view === "rate";
+    const val = (p) => (rateView ? p.rate : p.v);
+    const all = [...r.past, ...r.future];
+    let ymax = r.capacity;
+    if (rateView) {
+      const peak = Math.max(0.01, ...all.map((p) => p.rate));
+      const step = peak > 1 ? 0.5 : peak > 0.2 ? 0.1 : 0.02;
+      ymax = Math.ceil((peak * 1.1) / step) * step;
+    }
+    const x = (t) => ml + ((t - range.start) / (range.end - range.start)) * (W - ml - mr);
+    const y = (v) => mt + (1 - v / ymax) * (H - mt - mb);
+    const color = SERIES_COLORS[provider] || "var(--accent)";
+    const gid = "qtfill-" + provider.replace(/[^a-z0-9]/gi, "") + "-" + s.key.replace(/[^a-z0-9]/gi, "");
+    const nodes = [svg("defs", {}, svg("linearGradient", { id: gid, x1: "0", y1: "0", x2: "0", y2: "1" },
+      svg("stop", { offset: "0%", style: "stop-color:" + color + ";stop-opacity:.28" }),
+      svg("stop", { offset: "100%", style: "stop-color:" + color + ";stop-opacity:0" })))];
+
+    for (const f of [0, 0.5, 1]) {
+      nodes.push(svg("line", { x1: ml, x2: W - mr, y1: y(ymax * f), y2: y(ymax * f), style: "stroke:var(--grid);stroke-width:1" }));
+      nodes.push(svg("text", { x: ml - 8, y: y(ymax * f) + 4, "text-anchor": "end" }, rateView ? fmtRate(ymax * f) : fmtLeft(ymax * f)));
+    }
+    for (let d = new Date(range.start); d.getTime() < range.end; d.setDate(d.getDate() + 1)) {
+      const t = d.getTime();
+      nodes.push(svg("line", { x1: x(t), x2: x(t), y1: mt, y2: H - mb, style: "stroke:var(--grid);stroke-width:1" }));
+      nodes.push(svg("text", { x: x(t + DAY / 2), y: H - 7, "text-anchor": "middle" }, d.toLocaleDateString([], { weekday: "short", day: "numeric" })));
+    }
+    const path = (pts) => pts.map((p, i) => (i ? "L" : "M") + x(p.t).toFixed(1) + " " + y(val(p)).toFixed(1)).join("");
+    if (r.past.length > 1) {
+      const line = path(r.past);
+      nodes.push(svg("path", { d: line + "L" + x(r.past[r.past.length - 1].t).toFixed(1) + " " + y(0) + "L" + x(r.past[0].t).toFixed(1) + " " + y(0) + "Z", fill: "url(#" + gid + ")" }));
+      nodes.push(svg("path", { d: line, fill: "none", style: "stroke:" + color + ";stroke-width:2;stroke-linejoin:round" }));
+    }
+    if (r.future.length > 1) {
+      nodes.push(svg("path", { d: path(r.future), fill: "none", style: "stroke:" + color + ";stroke-width:2;stroke-dasharray:6 5;stroke-linejoin:round" }));
+    }
+    if (now >= range.start && now <= range.end) {
+      nodes.push(svg("line", { x1: x(now), x2: x(now), y1: mt - 6, y2: H - mb, style: "stroke:var(--faint);stroke-width:1" }));
+      nodes.push(svg("text", { x: x(now), y: mt - 10, "text-anchor": "middle" }, "Now"));
+      const nowPoint = r.future[0] || r.past[r.past.length - 1];
+      if (nowPoint) nodes.push(svg("circle", { cx: x(now), cy: y(val(nowPoint)), r: 4.5, style: "fill:" + color + ";stroke:var(--panel);stroke-width:2" }));
+    }
+    if (!rateView && r.emptyAt !== null && r.emptyAt > now && r.emptyAt < range.end) {
+      const ex = x(r.emptyAt);
+      nodes.push(svg("circle", { cx: ex, cy: y(0), r: 5.5, style: "fill:var(--panel);stroke:var(--ink);stroke-width:2" }));
+      // Next to the Now line the label goes to the right of the marker so the two don't collide.
+      const nearNow = ex - x(now) < 90;
+      const anchor = ex > W - 120 ? "end" : nearNow || ex < ml + 120 ? "start" : "middle";
+      nodes.push(svg("text", { x: nearNow && anchor === "start" ? ex + 10 : ex, y: y(0) - 12, "text-anchor": anchor, style: "fill:var(--ink);font-weight:600;font-size:12.5px" }, "Empty " + whenDay(r.emptyAt)));
+    }
+
+    const hair = svg("line", { y1: mt, y2: H - mb, style: "stroke:var(--muted);stroke-width:1", visibility: "hidden" });
+    const dot = svg("circle", { r: 4.5, style: "fill:" + color + ";stroke:var(--panel);stroke-width:2", visibility: "hidden" });
+    const hit = svg("rect", { x: ml, y: 0, width: W - ml - mr, height: H, fill: "transparent" });
+    nodes.push(hair, dot, hit);
+    const label = rateView ? "usage per hour" : "quota left";
+    const summary = providerName(provider) + " " + s.label + ": " + fmtLeft(r.remaining) + " of " + fmtLeft(r.capacity) + " left, burning " + fmtRate(r.burn) +
+      (r.emptyAt !== null && r.emptyAt > now ? ", empty " + whenDay(r.emptyAt) + " at this pace" : "");
+    const chart = svg("svg", { viewBox: "0 0 " + W + " " + H, height: H, role: "img", "aria-label": summary }, ...nodes);
+    const tip = el("div", { class: "qt-tip", hidden: true });
+    hit.addEventListener("pointermove", (event) => {
+      if (!all.length) return;
+      const box = chart.getBoundingClientRect();
+      const t = range.start + ((event.clientX - box.left) * (W / box.width) - ml) / (W - ml - mr) * (range.end - range.start);
+      let best = all[0];
+      for (const p of all) if (Math.abs(p.t - t) < Math.abs(best.t - t)) best = p;
+      const px = x(best.t), py = y(val(best));
+      hair.setAttribute("x1", px); hair.setAttribute("x2", px); hair.setAttribute("visibility", "visible");
+      dot.setAttribute("cx", px); dot.setAttribute("cy", py); dot.setAttribute("visibility", "visible");
+      const value = el("b", {}, rateView ? fmtRate(best.rate) : fmtLeft(best.v));
+      tip.replaceChildren(value, label + (best.t > now ? " (projected)" : ""), el("div", {}, new Date(best.t).toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })));
+      tip.hidden = false;
+      const scale = box.width / W;
+      tip.style.left = Math.min(px * scale + 12, box.width - tip.offsetWidth - 4) + "px";
+      tip.style.top = Math.max(0, py * scale - 46) + "px";
+    });
+    hit.addEventListener("pointerleave", () => { hair.setAttribute("visibility", "hidden"); dot.setAttribute("visibility", "hidden"); tip.hidden = true; });
+    wrap.append(chart, tip);
+    if (!r.past.length && !r.future.length) wrap.append(el("div", { class: "qt-none" }, "No quota readings in this range."));
+    return wrap;
+  }
+
+  let historyLoading = false;
+  // The chart's values as a table, one row per day plus now and the run-out time, so they can
+  // be read without a pointer.
+  function quotaTable(provider, r, range, now) {
+    const points = [...r.past, ...r.future];
+    if (!points.length) return null;
+    const times = [];
+    for (let d = new Date(range.start); d.getTime() < range.end; d.setDate(d.getDate() + 1)) times.push(d.getTime());
+    if (now > range.start && now < range.end) times.push(now);
+    if (r.emptyAt !== null && r.emptyAt > now && r.emptyAt < range.end) times.push(r.emptyAt);
+    const rows = times.sort((a, b) => a - b).flatMap((t) => {
+      const n = countAtOrBefore(points, t, (p) => p.t);
+      if (!n) return [];
+      const p = points[n - 1];
+      const label = t === now ? "Now" : t === r.emptyAt ? "Runs out" : t > now ? "Projected" : "";
+      return [el("tr", {}, el("td", {}, new Date(t).toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })),
+        el("td", { class: "num" }, fmtLeft(p.v)), el("td", { class: "num" }, fmtRate(p.rate)), el("td", {}, label))];
+    });
+    // Redraws replace the card, so the open state is kept here to survive the 30-second refresh.
+    const details = el("details", { class: "qt-table", "data-provider": provider, open: qt.openTables.has(provider) });
+    details.addEventListener("toggle", () => { if (details.open) qt.openTables.add(provider); else qt.openTables.delete(provider); });
+    details.append(el("summary", {}, "Show as a table"),
+      el("div", { class: "table-wrap" }, el("table", {},
+        el("thead", {}, el("tr", {}, el("th", {}, "Time"), el("th", {}, "Quota left"), el("th", {}, "Usage per hour"), el("th", {}, ""))),
+        el("tbody", {}, rows))));
+    return details;
+  }
+
+  async function loadHistory(key) {
+    if (historyLoading || Date.now() - qt.historyAt < HISTORY_REFRESH_MS) return;
+    historyLoading = true;
+    try {
+      const res = await fetch("/v8/management/routing/quota-history", { headers: { Authorization: "Bearer " + key }, cache: "no-store" });
+      if (!res.ok) return;
+      const body = await res.json();
+      qt.history = new Map((body.credentials || []).map((c) => [c.id, c.samples || []]));
+      qt.historyAt = Date.now();
+    } catch (err) {
+      // History is optional; the chart falls back to the current readings.
+    } finally {
+      historyLoading = false;
+    }
+  }
+
   /* ---------- Summary ---------- */
   function renderStatus(data) {
     const all = data.groups.flatMap((g) => g.credentials);
@@ -559,6 +1002,8 @@
       a.kind === "relogin" ? [" ", el("a", { href: "/management.html" }, "Open the management panel")] : null));
     $("notices").replaceChildren(...alerts, ...(data.warnings || []).map((w) => el("div", { class: "notice " + (w.level || "info") }, w.message)));
     renderStatus(data);
+    qt.data = data;
+    renderQuota();
     $("lanesNote").textContent = ordered(strategy)
       ? "Requests go to the first account in each lane. When it cools down or nears its limit, the next one takes over."
       : "With " + strategy + ", requests are spread across every active account.";
@@ -604,6 +1049,8 @@
       }
       if (!res.ok) throw new Error("HTTP " + res.status);
       const data = await res.json();
+      // The first render waits for history; later refreshes redraw when it arrives.
+      if (qt.historyAt) loadHistory(key).then(renderQuota); else await loadHistory(key);
       $("connect").hidden = true;
       $("loading").hidden = true;
       $("app").hidden = false;
@@ -622,6 +1069,8 @@
   });
   $("refresh").addEventListener("click", load);
   $("forget").addEventListener("click", () => { localStorage.removeItem(STORAGE_KEY); showConnect(); });
+  let resizeTimer = 0;
+  window.addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(renderQuota, 150); });
   document.addEventListener("visibilitychange", () => { if (!document.hidden) load(); });
   load();
   setInterval(() => { if (!document.hidden) load(); }, REFRESH_MS);

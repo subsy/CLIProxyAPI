@@ -101,3 +101,46 @@ func TestProjectQuotaWindowUse(t *testing.T) {
 		t.Fatalf("projection for a window that just started should be nil")
 	}
 }
+
+func TestGetQuotaHistoryReturnsLoadedCredentialsOnly(t *testing.T) {
+	now := time.Now()
+	manager := coreauth.NewManager(nil, nil, nil)
+	withQuota := func(id string) *coreauth.Auth {
+		return &coreauth.Auth{
+			ID:         id,
+			Provider:   "claude",
+			Attributes: map[string]string{"runtime_only": "true", coreauth.AttributeAuthKind: coreauth.AuthKindOAuth},
+			Quota: coreauth.QuotaState{ObservedAt: now, Signals: map[string]string{
+				"Anthropic-Ratelimit-Unified-7d-Utilization": "0.4",
+				"Anthropic-Ratelimit-Unified-7d-Reset":       strconv.FormatInt(now.Add(30*time.Hour).Unix(), 10),
+			}},
+		}
+	}
+	loaded, removed := withQuota("history-loaded"), withQuota("history-removed")
+	if _, errRegister := manager.Register(context.Background(), loaded); errRegister != nil {
+		t.Fatalf("Register error = %v", errRegister)
+	}
+	dashboard.DefaultQuotaHistory().Record([]*coreauth.Auth{loaded, removed})
+	h := NewHandlerWithoutConfigFilePath(&config.Config{}, manager)
+
+	rec := httptest.NewRecorder()
+	ginCtx, _ := gin.CreateTestContext(rec)
+	ginCtx.Request = httptest.NewRequest(http.MethodGet, "/v8/management/routing/quota-history", nil)
+	h.GetQuotaHistory(ginCtx)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Credentials []quotaHistoryCredential `json:"credentials"`
+	}
+	if errDecode := json.Unmarshal(rec.Body.Bytes(), &body); errDecode != nil {
+		t.Fatalf("decode: %v", errDecode)
+	}
+	if len(body.Credentials) != 1 || body.Credentials[0].ID != "history-loaded" {
+		t.Fatalf("credentials = %+v", body.Credentials)
+	}
+	samples := body.Credentials[0].Samples
+	if len(samples) != 1 || samples[0].At != now.Unix() || len(samples[0].Windows) != 1 || samples[0].Windows[0].Used != 0.4 {
+		t.Fatalf("samples = %+v", samples)
+	}
+}

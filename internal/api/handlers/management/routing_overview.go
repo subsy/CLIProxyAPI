@@ -246,3 +246,32 @@ func routingOverviewWarnings(strategy string, affinity bool, byProvider map[stri
 	}
 	return warnings
 }
+
+type quotaHistoryCredential struct {
+	ID      string                    `json:"id"`
+	Samples []dashboard.HistorySample `json:"samples"`
+}
+
+// GetQuotaHistory returns the recorded day-or-longer quota windows of every loaded
+// credential so the dashboard can chart remaining quota over time. Labels, plans and
+// current windows come from the routing overview.
+func (h *Handler) GetQuotaHistory(c *gin.Context) {
+	if h == nil || h.authManager == nil {
+		c.JSON(503, gin.H{"error": "auth manager unavailable"})
+		return
+	}
+	history := dashboard.DefaultQuotaHistory().Snapshot()
+	credentials := make([]quotaHistoryCredential, 0)
+	for _, auth := range h.authManager.List() {
+		if auth == nil {
+			continue
+		}
+		samples := history[auth.ID]
+		if len(samples) == 0 {
+			continue
+		}
+		credentials = append(credentials, quotaHistoryCredential{ID: auth.ID, Samples: samples})
+	}
+	sort.Slice(credentials, func(i, j int) bool { return credentials[i].ID < credentials[j].ID })
+	c.JSON(200, gin.H{"credentials": credentials})
+}

@@ -107,6 +107,7 @@ func (s *Service) Run(ctx context.Context) error {
 		log.Infof("core auth auto-refresh started (interval=%s)", interval)
 		dashboard.DefaultAlerter().Configure(s.cfg.Routing.Alerts)
 		dashboard.DefaultAlerter().Start(ctx, s.coreManager.List)
+		dashboard.DefaultQuotaHistory().Start(ctx, s.coreManager.List, dashboard.HistoryPath(s.configPath))
 	}
 
 	if !homeEnabled {
