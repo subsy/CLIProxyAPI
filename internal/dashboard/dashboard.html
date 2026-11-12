@@ -586,7 +586,7 @@
   const SERIES_COLORS = { claude: "var(--claude)", codex: "var(--openai)", openai: "var(--openai)", gemini: "var(--gemini)" };
   const MODEL_NAMES = { opus: "Opus", sonnet: "Sonnet", fable: "Fable", haiku: "Haiku" };
   const QT_PREFS_KEY = "cpa-routing-dashboard-quota-view";
-  const qt = { provider: "all", view: "remaining", burnHours: 3, factor: 1, weekOffset: 0, series: {}, history: new Map(), historyAt: 0, data: null, cache: {} };
+  const qt = { provider: "all", view: "remaining", burnHours: 3, factor: 1, weekOffset: 0, series: {}, history: new Map(), historyAt: 0, data: null, cache: {}, openTables: new Set() };
   try { Object.assign(qt, JSON.parse(localStorage.getItem(QT_PREFS_KEY) || "{}")); } catch (err) { /* ignore a malformed saved view */ }
   // Reset times derived from "resets in N seconds" drift a little between readings.
   const RESET_TOLERANCE_MS = 120000;
@@ -813,7 +813,14 @@
     if (without.length) {
       cards.push(el("div", { class: "qt-none" }, without.join(", ") + (without.length === 1 ? " reports" : " report") + " no weekly quota, so " + (without.length === 1 ? "it isn’t" : "they aren’t") + " charted."));
     }
+    // Keep keyboard focus on a table toggle across the redraw.
+    const active = document.activeElement;
+    const focusProvider = active && active.tagName === "SUMMARY" && active.parentElement.classList.contains("qt-table") ? active.parentElement.dataset.provider : null;
     $("qtCards").replaceChildren(...cards);
+    if (focusProvider) {
+      const kept = [...$("qtCards").querySelectorAll(".qt-table")].find((d) => d.dataset.provider === focusProvider);
+      if (kept) kept.querySelector("summary").focus();
+    }
   }
 
   function renderQuotaCard(provider, creds, series, range, now) {
@@ -835,7 +842,7 @@
         el("div", {}, el("span", { class: "qt-big" }, fmtLeft(r.remaining)), el("span", { class: "qt-of" }, "of " + fmtLeft(r.capacity))),
         el("div", { class: "qt-burn" }, "Burn, last " + qt.burnHours + "h", el("b", {}, fmtRate(r.burn)), outlook || null)),
       quotaChart(provider, s, r, range, now),
-      quotaTable(r, range, now));
+      quotaTable(provider, r, range, now));
   }
 
   function quotaChart(provider, s, r, range, now) {
@@ -926,7 +933,7 @@
   let historyLoading = false;
   // The chart's values as a table, one row per day plus now and the run-out time, so they can
   // be read without a pointer.
-  function quotaTable(r, range, now) {
+  function quotaTable(provider, r, range, now) {
     const points = [...r.past, ...r.future];
     if (!points.length) return null;
     const times = [];
@@ -941,10 +948,14 @@
       return [el("tr", {}, el("td", {}, new Date(t).toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })),
         el("td", { class: "num" }, fmtLeft(p.v)), el("td", { class: "num" }, fmtRate(p.rate)), el("td", {}, label))];
     });
-    return el("details", { class: "qt-table" }, el("summary", {}, "Show as a table"),
+    // Redraws replace the card, so the open state is kept here to survive the 30-second refresh.
+    const details = el("details", { class: "qt-table", "data-provider": provider, open: qt.openTables.has(provider) });
+    details.addEventListener("toggle", () => { if (details.open) qt.openTables.add(provider); else qt.openTables.delete(provider); });
+    details.append(el("summary", {}, "Show as a table"),
       el("div", { class: "table-wrap" }, el("table", {},
         el("thead", {}, el("tr", {}, el("th", {}, "Time"), el("th", {}, "Quota left"), el("th", {}, "Usage per hour"), el("th", {}, ""))),
         el("tbody", {}, rows))));
+    return details;
   }
 
   async function loadHistory(key) {
