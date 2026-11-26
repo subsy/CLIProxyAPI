@@ -129,9 +129,9 @@ func TestUnixPluginReloadAfterShutdownUsesReplacedFile(t *testing.T) {
 
 	secondClient.Shutdown()
 
-	// Reopening without a content change maps a fresh image: native Go images
-	// stay mapped after shutdown, and reusing one would also reuse its
-	// shut-down package globals (TestAcquireShadowPluginLoadDoesNotReuseResidentImage).
+	// Reopening without a content change must map a fresh image: native Go
+	// images stay mapped after shutdown, and reusing one would also reuse
+	// its shut-down package globals (see TestAcquireShadowPluginLoadDoesNotReuseResidentImage).
 	thirdClient, errOpenThird := dynamicLibraryLoader{}.Open(file, host)
 	if errOpenThird != nil {
 		t.Fatalf("Open() third error = %v", errOpenThird)
@@ -140,8 +140,14 @@ func TestUnixPluginReloadAfterShutdownUsesReplacedFile(t *testing.T) {
 	if !okThird {
 		t.Fatalf("Open() third client type = %T, want *dynamicLibraryClient", thirdClient)
 	}
-	if third.handle == second.handle {
-		t.Fatalf("third handle reuses the shut-down resident image %v", second.handle)
+	if third.handle == nil {
+		t.Fatal("third client handle is nil")
+	}
+	if third.handle == second.handle || third.handle == firstHandle {
+		t.Fatalf("third handle = %v, must not reuse prior handles (first=%v, second=%v)", third.handle, firstHandle, second.handle)
+	}
+	if third.tempPath == second.tempPath {
+		t.Fatalf("third tempPath = %q, want distinct reload shadow copy", third.tempPath)
 	}
 	respThird, errCallThird := thirdClient.Call(context.Background(), "test.marker", nil)
 	if errCallThird != nil {
